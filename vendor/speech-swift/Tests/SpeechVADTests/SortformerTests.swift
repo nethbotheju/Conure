@@ -1,0 +1,385 @@
+import XCTest
+@testable import SpeechVAD
+import AudioCommon
+
+final class SortformerTests: XCTestCase {
+
+    // MARK: - Config Tests
+
+    func testDefaultConfig() {
+        let config = SortformerConfig.default
+        XCTAssertEqual(config.nMels, 128)
+        XCTAssertEqual(config.nFFT, 400)
+        XCTAssertEqual(config.hopLength, 160)
+        XCTAssertEqual(config.sampleRate, 16000)
+        XCTAssertEqual(config.spkcacheLen, 188)
+        XCTAssertEqual(config.fifoLen, 40)
+        XCTAssertEqual(config.fcDModel, 512)
+        XCTAssertEqual(config.maxSpeakers, 4)
+        XCTAssertEqual(config.subsamplingFactor, 8)
+        XCTAssertEqual(config.onset, 0.5, accuracy: 0.001)
+        // NeMo parity: symmetric 0.5/0.5 binarization thresholds.
+        XCTAssertEqual(config.offset, 0.5, accuracy: 0.001)
+    }
+
+    func testCustomConfig() {
+        let config = SortformerConfig(
+            nMels: 80,
+            onset: 0.6,
+            offset: 0.4,
+            minSpeechDuration: 0.5
+        )
+        XCTAssertEqual(config.nMels, 80)
+        XCTAssertEqual(config.onset, 0.6, accuracy: 0.001)
+        XCTAssertEqual(config.offset, 0.4, accuracy: 0.001)
+        XCTAssertEqual(config.minSpeechDuration, 0.5, accuracy: 0.001)
+        // Other fields should have defaults
+        XCTAssertEqual(config.hopLength, 160)
+        XCTAssertEqual(config.sampleRate, 16000)
+    }
+
+    // MARK: - Mel Extractor Tests
+
+    func testMelExtractorOutputShape() {
+        let config = SortformerConfig.default
+        let extractor = SortformerMelExtractor(config: config)
+
+        // 1 second of audio at 16kHz
+        let audio = [Float](repeating: 0.1, count: 16000)
+        let (melSpec, nFrames) = extractor.extract(audio)
+
+        // Expected frames: (16000 + 200 + 200 - 400) / 160 + 1 = 101
+        // With reflect padding: (16000) / 160 + 1 = 101
+        XCTAssertGreaterThan(nFrames, 90, "Should produce ~100 frames for 1s audio")
+        XCTAssertLessThan(nFrames, 110, "Should produce ~100 frames for 1s audio")
+        XCTAssertEqual(melSpec.count, nFrames * 128, "Flat array should be nFrames * 128")
+    }
+
+    func testMelExtractorEmptyAudio() {
+        let extractor = SortformerMelExtractor()
+        let (melSpec, nFrames) = extractor.extract([])
+
+        // Empty audio should produce zero-length output (padded frame at most)
+        XCTAssertEqual(melSpec.count, nFrames * 128)
+    }
+
+    func testMelExtractorShortAudio() {
+        let extractor = SortformerMelExtractor()
+
+        // Very short: 400 samples (25ms at 16kHz)
+        let audio = [Float](repeating: 0.5, count: 400)
+        let (melSpec, nFrames) = extractor.extract(audio)
+
+        XCTAssertGreaterThan(nFrames, 0, "Should produce at least 1 frame")
+        XCTAssertEqual(melSpec.count, nFrames * 128)
+
+        // Values should be finite
+        for val in melSpec {
+            XCTAssertFalse(val.isNaN, "Mel values should not be NaN")
+            XCTAssertFalse(val.isInfinite, "Mel values should not be infinite")
+        }
+    }
+
+    func testMelExtractorValuesFinite() {
+        let extractor = SortformerMelExtractor()
+
+        // Sine wave at 440Hz
+        let audio = (0..<16000).map { i in
+            sinf(2.0 * Float.pi * 440.0 * Float(i) / 16000.0) * 0.5
+        }
+        let (melSpec, nFrames) = extractor.extract(audio)
+
+        XCTAssertGreaterThan(nFrames, 0)
+        for val in melSpec {
+            XCTAssertFalse(val.isNaN)
+            XCTAssertFalse(val.isInfinite)
+        }
+
+        // 440Hz should produce a peak in a low-mid mel bin, not at the very top
+        // Find the bin with max energy in the first frame
+        var maxBin = 0
+        var maxEnergy: Float = -Float.infinity
+        for b in 0..<128 {
+            if melSpec[b] > maxEnergy {
+                maxEnergy = melSpec[b]
+                maxBin = b
+            }
+        }
+        // 440Hz maps to mel bin ~20-30 (out of 128), should be in lower half
+        XCTAssertLessThan(maxBin, 64,
+                          "440Hz peak should be in the lower half of mel bins (got bin \(maxBin))")
+    }
+
+    func testMelFilterbankUsesSlaneyScale() {
+        // The checkpoint is trained on librosa-default (Slaney) mel bins:
+        // linear below 1 kHz, logarithmic above. The HTK formula places a
+        // 500 Hz tone ~6 bins higher, which is the regression this guards.
+        let extractor = SortformerMelExtractor()
+        let toneHz: Float = 500.0
+        let audio = (0..<16000).map { i in
+            sinf(2.0 * Float.pi * toneHz * Float(i) / 16000.0) * 0.5
+        }
+        let (melSpec, nFrames) = extractor.extract(audio)
+        XCTAssertGreaterThan(nFrames, 10)
+
+        // Use a mid frame to avoid edge padding effects.
+        let frame = nFrames / 2
+        var maxBin = 0
+        var maxEnergy: Float = -.infinity
+        for b in 0..<128 where melSpec[frame * 128 + b] > maxEnergy {
+            maxEnergy = melSpec[frame * 128 + b]
+            maxBin = b
+        }
+
+        // Expected bin under the Slaney scale: centers are linearly spaced in
+        // mel between mel(0) and mel(8000) with 130 edge points.
+        func hzToMelSlaney(_ hz: Float) -> Float {
+            let fSp: Float = 200.0 / 3.0
+            let minLogHz: Float = 1000.0
+            let logStep = logf(6.4) / 27.0
+            return hz >= minLogHz
+                ? minLogHz / fSp + logf(hz / minLogHz) / logStep
+                : hz / fSp
+        }
+        let melMax = hzToMelSlaney(8000)
+        let expected = Int((hzToMelSlaney(toneHz) / melMax * 129).rounded()) - 1
+        XCTAssertLessThanOrEqual(abs(maxBin - expected), 1,
+                                 "500 Hz peak should sit at Slaney bin \(expected), got \(maxBin)")
+    }
+
+    // MARK: - Binarization Tests (reuses PowersetDecoder.binarize)
+
+    func testBinarizationSingleSpeaker() {
+        // Simulate a single speaker active from frames 10-50
+        let numFrames = 100
+        let frameDuration: Float = 0.01  // 10ms per frame
+        var probs = [Float](repeating: 0.0, count: numFrames)
+        for i in 10..<50 {
+            probs[i] = 0.9
+        }
+
+        let segments = PowersetDecoder.binarize(
+            probs: probs, onset: 0.5, offset: 0.3, frameDuration: frameDuration)
+
+        XCTAssertEqual(segments.count, 1, "Should detect exactly 1 segment")
+        if let seg = segments.first {
+            XCTAssertEqual(seg.startTime, 0.1, accuracy: 0.02)
+            XCTAssertEqual(seg.endTime, 0.5, accuracy: 0.02)
+        }
+    }
+
+    func testBinarizationHysteresis() {
+        // Test that offset < onset creates hysteresis
+        let numFrames = 100
+        let frameDuration: Float = 0.01
+        var probs = [Float](repeating: 0.0, count: numFrames)
+
+        // Rising above onset at frame 10
+        for i in 10..<20 { probs[i] = 0.8 }
+        // Dip between onset and offset (should stay active)
+        for i in 20..<30 { probs[i] = 0.4 }
+        // Back up
+        for i in 30..<40 { probs[i] = 0.8 }
+        // Drop below offset at frame 40
+
+        let segments = PowersetDecoder.binarize(
+            probs: probs, onset: 0.5, offset: 0.3, frameDuration: frameDuration)
+
+        // The dip to 0.4 is above offset (0.3), so it should be one continuous segment
+        XCTAssertEqual(segments.count, 1,
+                       "Hysteresis should merge segments when prob stays above offset")
+    }
+
+    func testBinarizationNoSpeech() {
+        let probs = [Float](repeating: 0.1, count: 100)
+        let segments = PowersetDecoder.binarize(
+            probs: probs, onset: 0.5, offset: 0.3, frameDuration: 0.01)
+        XCTAssertTrue(segments.isEmpty, "Should produce no segments for low probs")
+    }
+
+    // MARK: - State Buffer Tests
+
+    func testStateBufferDimensions() {
+        let config = SortformerConfig.default
+
+        // Verify state buffer sizes
+        let spkcacheSize = config.spkcacheLen * config.fcDModel
+        XCTAssertEqual(spkcacheSize, 188 * 512, "Speaker cache should be 188 * 512")
+
+        let fifoSize = config.fifoLen * config.fcDModel
+        XCTAssertEqual(fifoSize, 40 * 512, "FIFO should be 40 * 512")
+    }
+
+    #if canImport(CoreML)
+    // MARK: - Streaming session equivalence (requires model download)
+
+    /// The incremental session must reproduce whole-buffer diarization with
+    /// the same `.streaming` preset: identical chunk math fed identical mel.
+    /// Arbitrary push sizes exercise the PCM carry and mel-margin logic.
+    func testUltraEightSlotSessionStaysWithinItsWidth() async throws {
+        let session: SortformerStreamingSession
+        do {
+            session = try await SortformerStreamingSession.fromPretrained(
+                modelId: SortformerDiarizer.ultraStreamingModelId,
+                offlineMode: true,
+                config: .streamingUltra8)
+        } catch {
+            throw XCTSkip("Ultra-Sortformer model not cached: \(error)")
+        }
+
+        if let real = ProcessInfo.processInfo
+            .environment["SORTFORMER_E2E_REAL_AUDIO"]
+        {
+            let audio = try AudioFileLoader.load(
+                url: URL(fileURLWithPath: real), targetSampleRate: 16_000)
+            let step = 7_680
+            var offset = 0
+            while offset < min(audio.count, 30 * 16_000) {
+                let upper = min(audio.count, offset + step)
+                _ = try session.push(audio: Array(audio[offset..<upper]))
+                offset = upper
+            }
+            try session.finish()
+            let result = session.currentResult()
+            print("REAL-AUDIO result segments \(result.segments.count) speakers \(result.numSpeakers)")
+            XCTAssertFalse(result.segments.isEmpty)
+            return
+        }
+
+        // Same deterministic alternating-burst audio family as the base
+        // session test: enough speech to exercise cache spill, no claim
+        // about true speaker count — the invariants are width and sanity.
+        var seed: UInt64 = 0x0817_2026
+        func nextFloat() -> Float {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Float(Int64(bitPattern: seed >> 11)) / Float(Int64.max)
+        }
+        var audio = [Float](repeating: 0, count: 12 * 16_000)
+        var cursor = 0
+        var voice = 0
+        while cursor < audio.count {
+            let burst = 12_000 + Int(abs(nextFloat()) * 12_000)
+            let gap = 3_000 + Int(abs(nextFloat()) * 3_000)
+            let end = min(audio.count, cursor + burst)
+            let carrier: Float = voice == 0 ? 200 : 340
+            for i in cursor..<end {
+                let envelope = 0.5 + 0.5 * sin(
+                    2 * .pi * carrier * Float(i) / 16_000)
+                audio[i] = 0.2 * nextFloat() * envelope
+            }
+            cursor = end + gap
+            voice = 1 - voice
+        }
+
+        let step = 7_680
+        var offset = 0
+        while offset < audio.count {
+            let upper = min(audio.count, offset + step)
+            _ = try session.push(audio: Array(audio[offset..<upper]))
+            offset = upper
+        }
+        try session.finish()
+        let result = session.currentResult()
+
+        // The Ultra fine-tune trained on real speech and legitimately stays
+        // quiet on synthetic noise, so the default path asserts structural
+        // invariants only; SORTFORMER_E2E_REAL_AUDIO above is the strict
+        // behavioral check (non-empty segments on real speech).
+        XCTAssertTrue(result.segments.allSatisfy {
+            (0..<8).contains($0.speakerId)
+        })
+        XCTAssertLessThanOrEqual(
+            Set(result.segments.map(\.speakerId)).count, 8)
+    }
+
+    func testStreamingSessionMatchesWholeBufferDiarization() async throws {
+        let diarizer: SortformerDiarizer
+        do {
+            diarizer = try await SortformerDiarizer.fromPretrained(
+                offlineMode: true, config: .streaming)
+        } catch {
+            throw XCTSkip("Sortformer streaming model not cached: \(error)")
+        }
+
+        // Deterministic two-voice-shaped audio: alternating band-limited
+        // bursts with silence gaps, 19 s so the FIFO spills into the cache.
+        var seed: UInt64 = 0x5EED_2026
+        func nextFloat() -> Float {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Float(Int64(bitPattern: seed >> 11)) / Float(Int64.max)
+        }
+        var audio = [Float](repeating: 0, count: 19 * 16_000)
+        var cursor = 0
+        var voice = 0
+        while cursor < audio.count {
+            let burst = 16_000 + Int(abs(nextFloat()) * 16_000)
+            let gap = 4_000 + Int(abs(nextFloat()) * 4_000)
+            let end = min(audio.count, cursor + burst)
+            let carrier: Float = voice == 0 ? 180 : 320
+            for i in cursor..<end {
+                let envelope = 0.5 + 0.5 * sin(
+                    2 * .pi * carrier * Float(i) / 16_000)
+                audio[i] = 0.2 * nextFloat() * envelope
+            }
+            cursor = end + gap
+            voice = 1 - voice
+        }
+
+        let offline = diarizer.diarize(
+            audio: audio, sampleRate: 16_000, config: .default)
+
+        let session = diarizer.makeStreamingSession()
+        var pushed = 0
+        var pushSize = 1_000
+        while pushed < audio.count {
+            let end = min(audio.count, pushed + pushSize)
+            _ = try session.push(audio: Array(audio[pushed..<end]))
+            pushed = end
+            pushSize = pushSize == 1_000 ? 7_333 : 1_000
+        }
+        let streamed = try session.finish()
+
+        XCTAssertEqual(streamed.segments.count, offline.segments.count)
+        for (lhs, rhs) in zip(streamed.segments, offline.segments) {
+            XCTAssertEqual(lhs.speakerId, rhs.speakerId)
+            XCTAssertEqual(lhs.startTime, rhs.startTime, accuracy: 0.09)
+            XCTAssertEqual(lhs.endTime, rhs.endTime, accuracy: 0.09)
+        }
+    }
+
+    // MARK: - E2E Integration Test (requires model download)
+
+    func testE2EWithRealModel() async throws {
+        let diarizer: SortformerDiarizer
+        do {
+            diarizer = try await SortformerDiarizer.fromPretrained()
+        } catch {
+            throw XCTSkip("Sortformer model not cached: \(error)")
+        }
+
+        let audioURL = URL(fileURLWithPath: "Tests/Qwen3ASRTests/Resources/test_audio.wav")
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            throw XCTSkip("Test audio file not found")
+        }
+
+        let audio = try AudioFileLoader.load(
+            url: audioURL, targetSampleRate: 16000)
+
+        let result = diarizer.diarize(
+            audio: audio, sampleRate: 16000, config: .default)
+
+        XCTAssertGreaterThanOrEqual(result.segments.count, 1,
+                                     "Should detect at least 1 segment")
+
+        for seg in result.segments {
+            XCTAssertGreaterThanOrEqual(seg.startTime, 0)
+            XCTAssertGreaterThan(seg.endTime, seg.startTime)
+            XCTAssertGreaterThanOrEqual(seg.speakerId, 0)
+            XCTAssertLessThan(seg.speakerId, 4)
+        }
+
+        // Speaker embeddings should be empty for Sortformer (end-to-end)
+        XCTAssertTrue(result.speakerEmbeddings.isEmpty)
+    }
+    #endif
+}

@@ -1,0 +1,20 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+dist/
+build/
+
+# upstream repo tooling, not needed for our build
+vendor/speech-swift/.claude/
+vendor/speech-swift/.codex/
+vendor/speech-swift/.github/
+vendor/speech-swift/.spi.yml
+vendor/speech-swift/AGENTS.md
+
+# local-only working notes
+docs/
+prompt.txt
