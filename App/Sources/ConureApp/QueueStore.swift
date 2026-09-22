@@ -47,7 +47,9 @@ final class QueueStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.runningProcess?.terminate()
+            MainActor.assumeIsolated {
+                self?.runningProcess?.terminate()
+            }
         }
     }
 

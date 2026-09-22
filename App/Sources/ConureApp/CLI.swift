@@ -45,8 +45,8 @@ final class LineBuffer: @unchecked Sendable {
     }
 }
 
-final class CLI {
-    nonisolated(unsafe) static let shared = CLI()
+final class CLI: @unchecked Sendable {
+    static let shared = CLI()
 
     private let queue = DispatchQueue(label: "conure.cli")
     private init() {}
@@ -76,7 +76,7 @@ final class CLI {
         return bundled
     }
 
-    func models(_ completion: @escaping ([CLIModelRow]) -> Void) {
+    func models(_ completion: @escaping @Sendable ([CLIModelRow]) -> Void) {
         run(["models", "list", "--json"]) { output in
             let rows = output.flatMap { Data($0.utf8) }
                 .flatMap { try? JSONDecoder().decode([CLIModelRow].self, from: $0) } ?? []
@@ -86,19 +86,19 @@ final class CLI {
 
     func download(
         _ modelId: String,
-        onEvent: @escaping (CLIEvent) -> Void,
-        onEnd: @escaping () -> Void
+        onEvent: @escaping @Sendable (CLIEvent) -> Void,
+        onEnd: @escaping @Sendable () -> Void
     ) {
         runStreaming(["models", "download", modelId], onEvent: onEvent, onEnd: onEnd)
     }
 
-    func remove(_ modelId: String, onEnd: @escaping () -> Void) {
+    func remove(_ modelId: String, onEnd: @escaping @Sendable () -> Void) {
         runStreaming(["models", "remove", modelId], onEvent: { _ in }, onEnd: onEnd)
     }
 
     private func run(
         _ arguments: [String],
-        completion: @escaping (String?) -> Void
+        completion: @escaping @Sendable (String?) -> Void
     ) {
         queue.async { [self] in
             let process = Process()
@@ -120,8 +120,8 @@ final class CLI {
 
     private func runStreaming(
         _ arguments: [String],
-        onEvent: @escaping (CLIEvent) -> Void,
-        onEnd: @escaping () -> Void
+        onEvent: @escaping @Sendable (CLIEvent) -> Void,
+        onEnd: @escaping @Sendable () -> Void
     ) {
         queue.async { [self] in
             let process = Process()
