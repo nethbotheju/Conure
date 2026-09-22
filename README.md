@@ -1,38 +1,46 @@
-# Conure
+<p align="center">
+  <img src="App/Resources/icon.png" width="140" alt="Conure">
+</p>
 
-Local-first audio/video transcription for Apple Silicon Macs, powered by NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine). CLI + GUI sharing one engine.
+<h1 align="center">Conure</h1>
 
-- **Fast** — ~45–95× real-time on M-series (2-hour file ≈ 2–3 minutes)
-- **Lean** — peak memory ~1.7 GB for a 2-hour file (budget: 3–4 GB)
-- **Private** — everything runs locally; no audio ever leaves your Mac
-- **Speaker-aware** — diarization with your attendee names (up to 4 speakers)
-- **Formats** — Markdown (optional timestamps) and SRT
+<p align="center"><strong>Local-first audio &amp; video transcription for Apple Silicon Macs.</strong></p>
 
-## Requirements
+<p align="center">
+  <a href="https://github.com/nethbotheju/Conure/actions/workflows/ci.yml"><img src="https://github.com/nethbotheju/Conure/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/nethbotheju/Conure/releases"><img src="https://img.shields.io/github/v/tag/nethbotheju/Conure?label=release" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
+</p>
 
-- macOS 15+ on Apple Silicon (M1/M2/M3/M4)
-- Xcode 26 / Swift 6.2 to build
-- ~750 MB of model downloads on first use (auto-managed, see below)
+NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine), with speaker diarization, a queue-driven GUI, and a scriptable CLI — one engine behind both.
 
-## Build
+## Features
 
-```bash
-swift build -c release
-.build/release/conure --help
-```
+- **Fully local:** audio never leaves your Mac, and everything works offline after the first model download.
+- **Fast:** ~45–95× real-time on Apple Silicon — a 2-hour recording transcribes in ~2–3 minutes.
+- **Lean:** ~1.7 GB peak memory, even for 2-hour files.
+- **Speaker-aware:** name up to 4 attendees and every line comes out labeled with the right speaker.
+- **App + CLI:** drop files into the queue app and watch live progress, or script the CLI with JSON output — one engine behind both.
+- **Formats:** clean Markdown with optional timestamps, or ready-to-use SRT subtitles with speaker prefixes.
 
-For development, a `Makefile` wraps the common tasks (`make help` lists all):
+## Install
 
-```bash
-make test                 # unit tests
-make app                  # dist/Conure.app (release build, bundled CLI, codesigned)
-make dmg VERSION=0.2.0    # dist/Conure-0.2.0.dmg (builds the app first)
-```
+1. Download the latest `Conure-<version>.dmg` from [Releases](https://github.com/nethbotheju/Conure/releases).
+2. Open the DMG and drag **Conure** to **Applications**.
+3. First launch: right-click the app → **Open** (it's unsigned — see below), and the required models (~240 MB) download automatically.
 
-CI (`.github/workflows/ci.yml`) builds and tests every PR; pushing a `vX.Y.Z` tag
-triggers a draft GitHub Release with the DMG attached (`.github/workflows/release.yml`).
+> **Unsigned app note:** Conure ships without a Developer ID. If macOS blocks it, right-click → **Open**, or clear the quarantine flag manually:
+> ```bash
+> xattr -cr /Applications/Conure.app
+> ```
 
-## Usage
+**Requirements:** macOS 15+ on Apple Silicon (M1–M4). ~860 MB of model downloads on first use (auto-managed).
+
+## Quick start
+
+**App** — launch Conure, hit **＋**, drop in files (optionally name up to 4 speakers), and watch the queue run.
+
+**CLI** — install the bundled engine on your PATH from Settings, or use it straight from a build:
 
 ```bash
 # Plain transcript (Markdown, no timestamps) next to the input file
@@ -45,13 +53,11 @@ conure transcribe meeting.mp4 --speakers "Alice,Bob" --timed
 conure transcribe recording.m4a --speakers "Alice,Bob" --format srt
 
 # Multiple files (processed sequentially), custom output folder
-conure transcribe *.mp4 --speakers "Alice,Bob,Carol" --format md --output ~/transcripts
+conure transcribe *.mp4 --speakers "Alice,Bob,Carol" --output ~/transcripts
 
-# Progress as JSON lines (for tooling/GUI); --pretty for humans
+# Progress as JSON lines (for tooling); --pretty for humans
 conure transcribe talk.wav --pretty
 ```
-
-Options:
 
 | Flag | Default | Description |
 |---|---|---|
@@ -60,10 +66,9 @@ Options:
 | `--format` | `md` | `md` or `srt` |
 | `--timed / --no-timed` | no | Timestamps in Markdown output (`[H:MM:SS]` per line) |
 | `--output` | input folder | Output directory |
-| `--language` | `en` | Language hint; empty for auto-detect |
 | `--pretty` | JSON lines | Human-readable progress |
 
-## Model management
+## Models
 
 ```bash
 conure models list                 # registry, download status, sizes (also --json)
@@ -71,7 +76,7 @@ conure models download parakeet    # pre-download (~611 MB)
 conure models remove parakeet      # free disk space
 ```
 
-Models live in `~/Library/Application Support/Conure/models/` (override with `CONURE_MODELS_DIR`). Missing models are downloaded automatically on first use; the app downloads the required ones on first launch.
+Models live in `~/Library/Application Support/Conure/models/` (override with `CONURE_MODELS_DIR`). Missing models download automatically on first use.
 
 | Id | Purpose | Size | Removable |
 |---|---|---|---|
@@ -79,48 +84,33 @@ Models live in `~/Library/Application Support/Conure/models/` (override with `CO
 | `sortformer` | Speaker diarization (≤4 speakers), used with `--speakers` | ~239 MB | No (required) |
 | `silero` | Voice activity detection, used otherwise | ~1 MB | No (required) |
 
-Only Parakeet models can run on our all-CoreML engine today — other Parakeet variants and multilingual models need CoreML conversions that don't exist yet.
-
-## Output format example
-
-```markdown
-# meeting.mp4
-
-- **Duration:** 0:47:12
-- **Attendees:** Alice, Bob
-- **Model:** aufklarer/Parakeet-TDT-v3-CoreML-INT8-30s
-
-## Transcript
-
-[0:00:12] **Alice:** Alright, let's get started…
-[0:02:47] **Bob:** I pushed the fix yesterday.
-```
+Only Parakeet models run on the all-CoreML engine today — other variants (multilingual, unified-EN) need CoreML conversions that don't exist in a compatible format yet.
 
 ## How it works
 
-1. **Decode** — AVFoundation extracts mono 16 kHz PCM from any audio/video track (mp4, mov, m4a, mp3, wav, aac, aiff)
-2. **Segment** — with `--speakers`: Sortformer diarization produces speaker turns; otherwise Silero VAD finds utterances. Consecutive same-speaker turns merge into ≤25 s chunks
-3. **Transcribe** — each chunk through Parakeet TDT (30 s CoreML windows); chunk bounds become the line timestamps, so speaker labels and timestamps can never merge two speakers into one line
+1. **Decode** — AVFoundation extracts mono 16 kHz PCM (mp4, mov, m4a, mp3, wav, aac, aiff)
+2. **Segment** — with `--speakers`: Sortformer diarization produces speaker turns; otherwise Silero VAD finds utterances. Same-speaker turns merge into ≤25 s chunks
+3. **Transcribe** — each chunk through Parakeet TDT (30 s CoreML windows); chunk bounds become line timestamps, so a line can never blend two speakers
 4. **Write** — Markdown or SRT next to the input (or `--output` dir)
 
-Progress streams as JSON lines on stdout (one object per line): `{"type":"progress","stage":"asr","percent":42.1,"detail":"7/17"}` plus a final `{"type":"done",...}` or `{"type":"error",...}`. The GUI drives this exact CLI as a subprocess — one engine everywhere.
+The GUI drives the exact CLI as a subprocess (JSON progress on stdout) — one engine everywhere. Internals and repo layout are documented in [AGENTS.md](AGENTS.md).
 
-## Architecture
+## Contributing
 
-```
-Sources/ConureCore/    engine library (audio, ASR, diarization, segmenter, writers, model store)
-Sources/conure/        CLI executable
-App/                   SwiftUI application (queue UI, add sheet, settings)
-vendor/speech-swift/   patched local fork of soniqo/speech-swift (Apache-2.0)
-```
+Pull requests are welcome.
 
-The vendored fork pins the Parakeet TDT decoder/joint networks to CPU: their per-token CoreML loop
-on delegated units (ANE/GPU) exhausts kernel IOSurface memory on long files. Our transcriber
-further wraps every prediction in an `autoreleasepool` — without it, autoreleased CoreML
-wrappers accumulate and the Neural Engine runtime dies after ~185 encoder calls.
+1. Fork the repo and create a branch using `<type>/<issue>-<slug>` (e.g. `feat/42-add-export`).
+2. Open a pull request against `main` describing the change.
 
-## License & credits
+Coding agents should follow [AGENTS.md](AGENTS.md) for project structure, conventions, and setup.
 
-- Conure code: MIT
-- `vendor/speech-swift`: Apache-2.0 © soniqo — https://github.com/soniqo/speech-swift
-- Model weights: Parakeet TDT (CC-BY-4.0, NVIDIA), Sortformer (NVIDIA), Silero VAD (MIT)
+## Credits
+
+- [speech-swift](https://github.com/soniqo/speech-swift) (Apache-2.0) © soniqo — the inference engine, vendored with a long-file fix at `vendor/speech-swift/`
+- Parakeet TDT weights (CC-BY-4.0) © NVIDIA
+- Sortformer © NVIDIA
+- Silero VAD (MIT)
+
+## License
+
+Conure code is released under the [MIT License](LICENSE).
