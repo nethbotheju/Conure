@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version stamp for the build (e.g. 0.2.0)"
+        required: false
+        default: "0.1.0-dev"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build app + DMG -> draft release
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag or input
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "tag must match vX.Y.Z (got: $TAG)" >&2
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Inject version into CLI
+        run: |
+          sed -i '' -E 's/current = ".*"/current = "${{ steps.ver.outputs.version }}"/' Sources/conure/ConureVersion.swift
+          grep 'current =' Sources/conure/ConureVersion.swift
+
+      - name: Build release + assemble .app + DMG
+        run: |
+          scripts/make-app.sh "${{ steps.ver.outputs.version }}"
+          scripts/make-dmg.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Checksum
+        run: |
+          cd dist
+          shasum -a 256 "Conure-${{ steps.ver.outputs.version }}.dmg" > "Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
+          cat "Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
+
+      - name: Verify CLI reports the tag version
+        run: |
+          BUILT="$(dist/Conure.app/Contents/Helpers/conure --version)"
+          echo "conure --version -> $BUILT"
+          case "$BUILT" in
+            *"${{ steps.ver.outputs.version }}"*) ;;
+            *) echo "version mismatch: expected ${{ steps.ver.outputs.version }}" >&2; exit 1 ;;
+          esac
+
+      - name: Create draft release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          gh release create "$TAG" \
+            --draft \
+            --verify-tag \
+            --generate-notes \
+            --title "Conure v${{ steps.ver.outputs.version }}" \
+            "dist/Conure-${{ steps.ver.outputs.version }}.dmg" \
+            "dist/Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
+
+      - name: Upload DMG artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conure-${{ steps.ver.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256

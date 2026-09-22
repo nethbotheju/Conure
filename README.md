@@ -21,6 +21,17 @@ swift build -c release
 .build/release/conure --help
 ```
 
+For development, a `Makefile` wraps the common tasks (`make help` lists all):
+
+```bash
+make test                 # unit tests
+make app                  # dist/Conure.app (release build, bundled CLI, codesigned)
+make dmg VERSION=0.2.0    # dist/Conure-0.2.0.dmg (builds the app first)
+```
+
+CI (`.github/workflows/ci.yml`) builds and tests every PR; pushing a `vX.Y.Z` tag
+triggers a draft GitHub Release with the DMG attached (`.github/workflows/release.yml`).
+
 ## Usage
 
 ```bash

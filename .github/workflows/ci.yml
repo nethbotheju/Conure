@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test (macOS arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'vendor/speech-swift/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'vendor/speech-swift/Package.swift') }}-
+            spm-${{ runner.os }}-
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Build (release smoke)
+        run: swift build -c release

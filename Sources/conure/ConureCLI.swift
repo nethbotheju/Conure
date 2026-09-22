@@ -26,7 +26,7 @@ struct ConureCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "conure",
         abstract: "Local audio/video transcription with Parakeet on Apple Silicon",
-        version: "0.1.0",
+        version: ConureVersion.current,
         subcommands: [TranscribeCommand.self, ModelsCommand.self],
         defaultSubcommand: TranscribeCommand.self
     )

@@ -32,5 +32,10 @@ let package = Package(
             name: "ConureApp",
             path: "App/Sources/ConureApp"
         ),
+        .testTarget(
+            name: "ConureCoreTests",
+            dependencies: ["ConureCore"],
+            path: "Tests/ConureCoreTests"
+        ),
     ]
 )
