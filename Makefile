@@ -26,5 +26,8 @@ dist: dmg ## Alias for dmg
 run: build ## Print CLI version (smoke)
 	swift run conure --version
 
+icon: ## Regenerate AppIcon.icns from App/Resources/icon-master.png
+	swift scripts/make-icon.swift App/Resources/icon-master.png App/Resources/AppIcon.icns
+
 clean: ## Remove build artifacts and dist/
 	rm -rf .build dist

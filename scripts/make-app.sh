@@ -16,6 +16,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers"
 cp "$BUILD_DIR/ConureApp" "$APP/Contents/MacOS/ConureApp"
 cp "$BUILD_DIR/conure" "$APP/Contents/Helpers/conure"
 
+if [ -f "$ROOT/App/Resources/AppIcon.icns" ]; then
+  mkdir -p "$APP/Contents/Resources"
+  cp "$ROOT/App/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,6 +36,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>ConureApp</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
