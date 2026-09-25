@@ -46,6 +46,7 @@ Tests/ConureCoreTests/  pure-logic unit tests (no model downloads)
 - CI (`.github/workflows/ci.yml`): build + test on every PR and push to `main` (macos-15 arm64).
 - Release (`.github/workflows/release.yml`): pushing tag `vX.Y.Z` → injects the version from the tag into `ConureVersion.swift` and the app bundle → builds DMG → **draft** GitHub Release with checksums. Manual `workflow_dispatch` builds a DMG artifact without releasing.
 - **Never hand-edit the version.** `ConureVersion.swift` stays `x.y.z-dev`; releases are stamped from tags only.
+- **Releasing:** `git tag vX.Y.Z` then `git push origin vX.Y.Z` — CI/CD handles everything (version stamping, DMG build, checksums, draft release). Just review the draft on the Releases page and publish it if it looks right.
 - The runner toolchain is newer than local Xcode — code must satisfy full strict concurrency (Sendable-safe captures in all `readabilityHandler`/`DispatchQueue.async` closures).
 
 ## Vendored speech-swift — read before touching
