@@ -52,12 +52,34 @@ final class CLI: @unchecked Sendable {
     private let queue = DispatchQueue(label: "conure.cli")
     private init() {}
 
+    var isDevApp: Bool { Bundle.main.bundleIdentifier == "com.conure.app.dev" }
+
+    var modelsURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if isDevApp {
+            return support.appendingPathComponent("Conure Dev/models", isDirectory: true)
+        }
+        if let override = ProcessInfo.processInfo.environment["CONURE_MODELS_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return support.appendingPathComponent("Conure/models", isDirectory: true)
+    }
+
+    func configure(_ process: Process) {
+        if isDevApp {
+            var environment = ProcessInfo.processInfo.environment
+            environment["CONURE_MODELS_DIR"] = modelsURL.path
+            process.environment = environment
+        }
+    }
+
     var url: URL {
+        let bundle = Bundle.main.bundleURL
+        let bundled = bundle.appendingPathComponent("Contents/Helpers/conure")
+        if isDevApp { return bundled }
         if let override = ProcessInfo.processInfo.environment["CONURE_CLI_PATH"] {
             return URL(fileURLWithPath: override)
         }
-        let bundle = Bundle.main.bundleURL
-        let bundled = bundle.appendingPathComponent("Contents/Helpers/conure")
         if FileManager.default.isExecutableFile(atPath: bundled.path) {
             return bundled
         }
@@ -105,6 +127,7 @@ final class CLI: @unchecked Sendable {
             let process = Process()
             process.executableURL = url
             process.arguments = arguments
+            configure(process)
             process.standardOutput = Pipe()
             let stderr = Pipe()
             process.standardError = stderr
@@ -132,6 +155,7 @@ final class CLI: @unchecked Sendable {
             let process = Process()
             process.executableURL = url
             process.arguments = arguments
+            configure(process)
             let stdout = Pipe()
             let stderr = Pipe()
             process.standardOutput = stdout

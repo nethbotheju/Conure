@@ -12,7 +12,7 @@ Pure SwiftPM project — there is no Xcode project or workspace. Do not create o
 Sources/ConureCore/     engine library: Audio, Transcriber, Diarizer, Segmenter, Writers, ModelStore, Pipeline, Events, Transcript
 Sources/conure/         CLI executable (ArgumentParser); ConureVersion.swift holds the version constant
 App/Sources/ConureApp/  SwiftUI app: QueueStore (job runner), CLI (subprocess + line buffering), SetupStore, JobsView, AddJobSheet, SettingsView
-App/Resources/          icon-master.png (source of truth), AppIcon.icns, icon.png (generated — never edit by hand)
+App/Resources/          icon-master.png / icon-dev-master.png (sources), AppIcon.icns / AppIcon-Dev.icns and icon*.png (generated — never edit by hand)
 vendor/speech-swift/    PATCHED local fork of soniqo/speech-swift — see rules below
 scripts/                make-app.sh, make-dmg.sh, make-icon.swift
 docs/                   plan.md (v1), plan-fluidaudio-v2.md (future second engine), research.md (engine landscape)
@@ -26,6 +26,7 @@ Tests/ConureCoreTests/  pure-logic unit tests (no model downloads)
 - Test: `swift test`
 - Common tasks: `make help` (app, dmg, icon, test, clean)
 - Assemble app bundle: `make app` → `dist/Conure.app` (release build, CLI in `Contents/Helpers/`, ad-hoc codesigned)
+- Assemble dev bundle: `make dev-app` → `dist/Conure Dev.app`; `make dev-icon` regenerates its icon separately.
 - Run GUI during development: `swift run ConureApp` (it finds the CLI via `CONURE_CLI_PATH` → bundled → `.build` → `/usr/local/bin`)
 - Model storage override for testing: `CONURE_MODELS_DIR=/tmp/some-dir`
 
@@ -44,10 +45,15 @@ Tests/ConureCoreTests/  pure-logic unit tests (no model downloads)
 ## Build & Release
 
 - CI (`.github/workflows/ci.yml`): build + test on every PR and push to `main` (macos-15 arm64).
+- Dev build (`.github/workflows/dev-build.yml`): after successful `main` push CI (or manual dispatch on `main`), uploads a ZIP artifact named `Conure-Dev-YYYYMMDD-SHA` with a SHA-256 checksum. **No tag or GitHub Release is created or needed for dev builds.** Artifacts expire after 14 days. Tags matching `v*` invoke the stable release workflow, not the dev workflow.
 - Release (`.github/workflows/release.yml`): pushing tag `vX.Y.Z` → injects the version from the tag into `ConureVersion.swift` and the app bundle → builds DMG → **draft** GitHub Release with checksums. Manual `workflow_dispatch` builds a DMG artifact without releasing.
 - **Never hand-edit the version.** `ConureVersion.swift` stays `x.y.z-dev`; releases are stamped from tags only.
 - **Releasing:** `git tag vX.Y.Z` then `git push origin vX.Y.Z` — CI/CD handles everything (version stamping, DMG build, checksums, draft release). Just review the draft on the Releases page and publish it if it looks right.
 - The runner toolchain is newer than local Xcode — code must satisfy full strict concurrency (Sendable-safe captures in all `readabilityHandler`/`DispatchQueue.async` closures).
+
+### Installing Conure Dev
+
+Find the latest successful **Dev build** run in [GitHub Actions](https://github.com/nethbotheju/Conure/actions/workflows/dev-build.yml) for `main` and download its `Conure-Dev-YYYYMMDD-SHA` artifact. Unzip the artifact download, verify its included ZIP with `shasum -a 256 -c *.zip.sha256`, then unzip that ZIP and move `Conure Dev.app` into `/Applications`. On first launch, right-click → **Open** if Gatekeeper prompts; the app is ad-hoc signed. Conure Dev runs its own bundled CLI and stores models in `~/Library/Application Support/Conure Dev/models/`, separate from stable Conure and the standalone CLI. To uninstall, remove `/Applications/Conure Dev.app`; optionally delete `~/Library/Application Support/Conure Dev/` to remove dev models.
 
 ## Vendored speech-swift — read before touching
 

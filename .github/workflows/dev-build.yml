@@ -1,0 +1,65 @@
+name: Dev build
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-build-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Build and assemble dev app
+        run: scripts/make-app.sh 0.1.0-dev dev
+
+      - name: Verify app identity and signature
+        run: |
+          APP="dist/Conure Dev.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist")" = 'com.conure.app.dev'
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$APP/Contents/Info.plist")" = 'Conure Dev'
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconFile' "$APP/Contents/Info.plist")" = 'AppIcon-Dev'
+          test -x "$APP/Contents/Helpers/conure"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Package ZIP and checksum
+        id: package
+        env:
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          DATE="$(date -u +%Y%m%d)"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          NAME="Conure-Dev-${DATE}-${SHORT_SHA}"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent 'Conure Dev.app' "$NAME.zip"
+          shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256"
+
+      - name: Upload installable dev build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          retention-days: 14
+          if-no-files-found: error
