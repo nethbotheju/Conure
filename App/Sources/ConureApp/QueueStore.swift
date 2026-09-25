@@ -120,6 +120,7 @@ final class QueueStore: ObservableObject {
             timed: job.configuration.timed,
             output: job.configuration.outputDirectory
         )
+        CLI.shared.configure(process)
 
         let stdout = Pipe()
         let stderr = Pipe()

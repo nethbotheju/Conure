@@ -3,8 +3,29 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT/.build/release"
-APP="$ROOT/dist/Conure.app"
 VERSION="${1:-0.1.0}"
+VARIANT="${2:-stable}"
+case "$VARIANT" in
+  stable)
+    APP_NAME="Conure"
+    BUNDLE_ID="com.conure.app"
+    ICON="AppIcon.icns"
+    ;;
+  dev)
+    APP_NAME="Conure Dev"
+    BUNDLE_ID="com.conure.app.dev"
+    ICON="AppIcon-Dev.icns"
+    ;;
+  *)
+    echo "error: unknown app variant: $VARIANT (expected stable or dev)" >&2
+    exit 1
+    ;;
+esac
+APP="$ROOT/dist/$APP_NAME.app"
+if [ ! -f "$ROOT/App/Resources/$ICON" ]; then
+  echo "error: missing icon: $ICON" >&2
+  exit 1
+fi
 
 echo "Building release binaries…"
 swift build -c release --package-path "$ROOT"
@@ -16,10 +37,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers"
 cp "$BUILD_DIR/ConureApp" "$APP/Contents/MacOS/ConureApp"
 cp "$BUILD_DIR/conure" "$APP/Contents/Helpers/conure"
 
-if [ -f "$ROOT/App/Resources/AppIcon.icns" ]; then
-  mkdir -p "$APP/Contents/Resources"
-  cp "$ROOT/App/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-fi
+mkdir -p "$APP/Contents/Resources"
+cp "$ROOT/App/Resources/$ICON" "$APP/Contents/Resources/$ICON"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -27,17 +46,17 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Conure</string>
+    <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>
-    <string>Conure</string>
+    <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.conure.app</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>ConureApp</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>${ICON%.icns}</string>
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>

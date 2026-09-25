@@ -126,9 +126,13 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("Command Line Tool") {
-                Text("The app runs the bundled \(CLI.shared.url.lastPathComponent) engine. Install it on your PATH to use Conure from the terminal.")
+                Text(CLI.shared.isDevApp
+                     ? "Conure Dev runs its own bundled CLI. The production CLI on your PATH is not changed."
+                     : "The app runs the bundled \(CLI.shared.url.lastPathComponent) engine. Install it on your PATH to use Conure from the terminal.")
                     .font(.callout)
-                Button("Install CLI to /usr/local/bin…") { installCLI() }
+                if !CLI.shared.isDevApp {
+                    Button("Install CLI to /usr/local/bin…") { installCLI() }
+                }
                 if let installMessage {
                     Text(installMessage)
                         .font(.caption)
@@ -136,7 +140,7 @@ struct SettingsView: View {
                 }
             }
             Section("Models Folder") {
-                Text("Models are stored in ~/Library/Application Support/Conure/models (FluidAudio weights in the FluidAudio subfolder).")
+                Text("Models are stored in \(CLI.shared.modelsURL.path) (FluidAudio weights in the FluidAudio subfolder).")
                     .font(.callout)
                     .textSelection(.enabled)
             }

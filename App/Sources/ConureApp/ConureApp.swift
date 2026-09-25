@@ -11,7 +11,7 @@ struct ConureApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Conure") {
+        WindowGroup(CLI.shared.isDevApp ? "Conure Dev" : "Conure") {
             JobsView()
                 .environmentObject(store)
                 .environmentObject(setup)

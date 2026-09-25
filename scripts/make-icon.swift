@@ -102,7 +102,9 @@ guard process.terminationStatus == 0 else {
     exit(1)
 }
 
-let pngURL = outputURL.deletingLastPathComponent().appendingPathComponent("icon.png")
+let pngName = outputURL.deletingPathExtension().lastPathComponent == "AppIcon-Dev"
+    ? "icon-dev.png" : "icon.png"
+let pngURL = outputURL.deletingLastPathComponent().appendingPathComponent(pngName)
 try! render(size: 1024).representation(using: .png, properties: [:])!.write(to: pngURL)
 print("Done: \(outputURL.path)")
 print("Done: \(pngURL.path)")
