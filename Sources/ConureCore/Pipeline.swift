@@ -20,11 +20,11 @@ public enum TranscribePipeline {
         progress?(.progress(.decode, 100, TimeFormat.clock(duration)))
 
         let tLoad = CFAbsoluteTimeGetCurrent()
-        let transcriber = try await Transcriber.load(
+        let transcriber = try await TranscriberFactory.load(
             modelId: options.modelId,
             progress: progress
         )
-        try transcriber.warmUp()
+        try await transcriber.warmUp()
         if timing { FileHandle.standardError.write(Data("[timing] asr-load \(CFAbsoluteTimeGetCurrent() - tLoad)s\n".utf8)) }
 
         let diarize = options.speakerNames != nil && !(options.speakerNames ?? []).isEmpty
@@ -60,7 +60,7 @@ public enum TranscribePipeline {
         let tAsr = CFAbsoluteTimeGetCurrent()
         for (index, chunk) in chunks.enumerated() {
             let slice = AudioDecoder.slice(samples, from: chunk.start, to: chunk.end, sampleRate: SampleRate.mono16k)
-            let text = try transcriber.transcribe(slice, sampleRate: SampleRate.mono16k, language: options.language)
+            let text = try await transcriber.transcribe(slice, sampleRate: SampleRate.mono16k, language: options.language)
             if !text.isEmpty {
                 lines.append(TranscriptLine(start: chunk.start, end: chunk.end, speaker: chunk.speaker, text: text))
             }

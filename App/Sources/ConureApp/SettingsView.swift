@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var downloading: String?
     @State private var downloadProgress: Double = 0
     @State private var installMessage: String?
+    @State private var modelError: String?
 
     private var asrModels: [CLIModelRow] { models.filter { !$0.required } }
     private var requiredModels: [CLIModelRow] { models.filter { $0.required } }
@@ -17,9 +18,19 @@ struct SettingsView: View {
                 .tabItem { Label("Models", systemImage: "shippingbox") }
             generalTab
                 .tabItem { Label("General", systemImage: "gear") }
+            licensesTab
+                .tabItem { Label("Credits", systemImage: "text.book.closed") }
         }
         .padding()
         .onAppear(perform: reload)
+        .alert("Model operation failed", isPresented: Binding(
+            get: { modelError != nil },
+            set: { if !$0 { modelError = nil } }
+        )) {
+            Button("OK") { modelError = nil }
+        } message: {
+            Text(modelError ?? "")
+        }
     }
 
     private var modelsTab: some View {
@@ -60,10 +71,15 @@ struct SettingsView: View {
                     if row.required {
                         tag("Required", .orange)
                     }
+                    tag(row.engine == "fluidAudio" ? "FluidAudio" : "speech-swift", .blue)
                 }
                 Text(row.notes)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let url = URL(string: "https://huggingface.co/\(row.repo)") {
+                    Link("Model details and license", destination: url)
+                        .font(.caption2)
+                }
             }
             Spacer()
             statusControl(row)
@@ -120,9 +136,23 @@ struct SettingsView: View {
                 }
             }
             Section("Models Folder") {
-                Text("Models are stored in ~/Library/Application Support/Conure/models")
+                Text("Models are stored in ~/Library/Application Support/Conure/models (FluidAudio weights in the FluidAudio subfolder).")
                     .font(.callout)
                     .textSelection(.enabled)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var licensesTab: some View {
+        Form {
+            Section("Inference engines") {
+                Link("FluidAudio — Apache-2.0", destination: URL(string: "https://github.com/FluidInference/FluidAudio/blob/v0.17.4/LICENSE")!)
+                Link("speech-swift — Apache-2.0 (vendored)", destination: URL(string: "https://github.com/soniqo/speech-swift/blob/main/LICENSE")!)
+            }
+            Section("Model credits") {
+                Text("Parakeet models © NVIDIA. See each model’s Hugging Face page for its license and attribution; Unified EN is CC-BY-4.0.")
+                Text("Sortformer © NVIDIA. Silero VAD — MIT.")
             }
         }
         .formStyle(.grouped)
@@ -143,6 +173,8 @@ struct SettingsView: View {
             Task { @MainActor in
                 if event.type == .progress, let percent = event.percent {
                     downloadProgress = percent
+                } else if event.type == .error {
+                    modelError = event.detail ?? "Download failed"
                 }
             }
         } onEnd: {

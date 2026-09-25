@@ -19,6 +19,7 @@ struct CLIModelRow: Codable, Identifiable {
     let name: String
     let repo: String
     let kind: String
+    let engine: String
     let downloaded: Bool
     let required: Bool
     let isDefault: Bool
@@ -105,7 +106,11 @@ final class CLI: @unchecked Sendable {
             process.executableURL = url
             process.arguments = arguments
             process.standardOutput = Pipe()
-            process.standardError = Pipe()
+            let stderr = Pipe()
+            process.standardError = stderr
+            stderr.fileHandleForReading.readabilityHandler = { handle in
+                if handle.availableData.isEmpty { handle.readabilityHandler = nil }
+            }
             do {
                 try process.run()
                 let data = (process.standardOutput as? Pipe)?
@@ -146,13 +151,25 @@ final class CLI: @unchecked Sendable {
                     }
                 }
             }
-            _ = stderr
+            stderr.fileHandleForReading.readabilityHandler = { handle in
+                if handle.availableData.isEmpty { handle.readabilityHandler = nil }
+            }
 
             do {
                 try process.run()
                 process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    onEvent(CLIEvent(
+                        type: .error, stage: nil, percent: nil,
+                        detail: "Model command failed (exit \(process.terminationStatus)); run the command in Terminal for details.",
+                        outputPath: nil
+                    ))
+                }
             } catch {
-                // surfaced through empty list / unchanged UI
+                onEvent(CLIEvent(
+                    type: .error, stage: nil, percent: nil,
+                    detail: error.localizedDescription, outputPath: nil
+                ))
             }
             onEnd()
         }
@@ -161,6 +178,7 @@ final class CLI: @unchecked Sendable {
     func makeArguments(
         input: URL,
         model: String?,
+        language: String?,
         speakers: [String]?,
         format: String,
         timed: Bool,
@@ -169,6 +187,9 @@ final class CLI: @unchecked Sendable {
         var args = ["transcribe", input.path]
         if let model, !model.isEmpty {
             args += ["--model", model]
+        }
+        if let language, !language.isEmpty {
+            args += ["--language", language]
         }
         if let speakers, !speakers.isEmpty {
             args += ["--speakers", speakers.joined(separator: ",")]

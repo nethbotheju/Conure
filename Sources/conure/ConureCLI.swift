@@ -43,7 +43,7 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe")
     var files: [URL]
 
-    @Option(help: "Model id (parakeet) or full HuggingFace repo (default: parakeet)")
+    @Option(help: "Model id or full HuggingFace repo (default: parakeet)")
     var model: String?
 
     @Option(help: "Attendee names, comma-separated (max 4). Enables speaker diarization")
@@ -155,6 +155,7 @@ struct ModelsCommand: ParsableCommand {
                     let name: String
                     let repo: String
                     let kind: String
+                    let engine: String
                     let downloaded: Bool
                     let required: Bool
                     let isDefault: Bool
@@ -168,6 +169,7 @@ struct ModelsCommand: ParsableCommand {
                         name: $0.displayName,
                         repo: $0.hfRepo,
                         kind: $0.kind.rawValue,
+                        engine: $0.engine.rawValue,
                         downloaded: ModelStore.isDownloaded($0),
                         required: $0.isRequired,
                         isDefault: $0.isDefault,
@@ -179,7 +181,7 @@ struct ModelsCommand: ParsableCommand {
                 let data = try JSONEncoder().encode(rows)
                 print(String(data: data, encoding: .utf8)!)
             } else {
-                print("Models are stored in \(ModelStore.baseURL.path)\n")
+                print("Models are stored in \(ModelStore.baseURL.path) (FluidAudio models in FluidAudio/)\n")
                 let asrModels = ModelStore.registry.filter { !$0.isRequired }
                 let requiredModels = ModelStore.registry.filter { $0.isRequired }
                 print("Transcription models (choose per job):")
@@ -202,7 +204,7 @@ struct ModelsCommand: ParsableCommand {
                 descriptor.isRequired ? "required" : nil,
             ].compactMap { $0 }.joined(separator: ", ")
             let tagLine = tags.isEmpty ? "" : " [\(tags)]"
-            return "  \(descriptor.id)\(tagLine)\n    \(descriptor.displayName)\n    \(status) — \(descriptor.notes)\n"
+            return "  \(descriptor.id)\(tagLine) [\(descriptor.engine.rawValue)]\n    \(descriptor.displayName)\n    \(status) — \(descriptor.notes)\n"
         }
 
         private func formatMB(_ bytes: Int64) -> String {
@@ -213,7 +215,7 @@ struct ModelsCommand: ParsableCommand {
     struct Download: AsyncParsableCommand {
         static let configuration = CommandConfiguration(commandName: "download", abstract: "Download a model")
 
-        @Argument(help: "Model id (parakeet, sortformer, silero) or full HuggingFace repo")
+        @Argument(help: "Model id or full HuggingFace repo; see `models list`")
         var id: String
 
         @Flag(help: "Human-readable progress instead of JSON lines")
@@ -242,7 +244,7 @@ struct ModelsCommand: ParsableCommand {
     struct Remove: ParsableCommand {
         static let configuration = CommandConfiguration(commandName: "remove", abstract: "Delete a downloaded model")
 
-        @Argument(help: "Model id (parakeet)")
+        @Argument(help: "Model id; see `models list`")
         var id: String
 
         func run() throws {

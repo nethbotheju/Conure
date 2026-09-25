@@ -43,12 +43,16 @@ final class SetupStore: ObservableObject {
                 if case .downloading(let name, _) = self?.phase,
                    event.type == .progress, let percent = event.percent {
                     self?.phase = .downloading(model: name, percent: percent)
+                } else if event.type == .error {
+                    self?.phase = .failed(event.detail ?? "Required model download failed")
                 }
             }
         } onEnd: { [weak self] in
             Task { @MainActor in
-                self?.missingRequiredModels.removeFirst()
-                self?.downloadNext()
+                guard let self else { return }
+                if case .failed = self.phase { return }
+                self.missingRequiredModels.removeFirst()
+                self.downloadNext()
             }
         }
     }

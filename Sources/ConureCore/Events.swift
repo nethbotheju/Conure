@@ -39,4 +39,4 @@ public struct ConureEvent: Sendable, Codable {
     }
 }
 
-public typealias ProgressSink = (ConureEvent) -> Void
+public typealias ProgressSink = @Sendable (ConureEvent) -> Void
