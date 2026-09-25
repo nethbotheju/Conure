@@ -17,10 +17,10 @@ NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine), with 
 ## Features
 
 - **Fully local:** audio never leaves your Mac, and everything works offline after the first model download.
-- **Fast:** ~45–95× real-time on Apple Silicon — a 2-hour recording transcribes in ~2–3 minutes.
-- **Lean:** ~1.7 GB peak memory, even for 2-hour files.
+- **Fast:** the default speech-swift model transcribes at ~45–95× real-time on Apple Silicon; other model speeds vary.
+- **Lean:** the default model used ~1.7 GB peak memory in a 2-hour test; FluidAudio long-file memory is still being validated.
 - **Speaker-aware:** name up to 4 attendees and every line comes out labeled with the right speaker.
-- **App + CLI:** drop files into the queue app and watch live progress, or script the CLI with JSON output — one engine behind both.
+- **App + CLI:** choose a model per job in the queue app or script the CLI with JSON output; both share the same pipeline.
 - **Formats:** clean Markdown with optional timestamps, or ready-to-use SRT subtitles with speaker prefixes.
 
 ## Install
@@ -57,11 +57,16 @@ conure transcribe *.mp4 --speakers "Alice,Bob,Carol" --output ~/transcripts
 
 # Progress as JSON lines (for tooling); --pretty for humans
 conure transcribe talk.wav --pretty
+
+# Punctuated English or multilingual transcription (models download on first use)
+conure transcribe meeting.mp4 --model parakeet-unified-en
+conure transcribe french.wav --model parakeet-v3-multilingual --language fr
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--model` | `parakeet` | Model id or HuggingFace repo |
+| `--language` | auto | Optional script hint for multilingual v3 (e.g. `fr`); Japanese auto-detects without a hint |
 | `--speakers` | — | Comma-separated attendee names (max 4); enables diarization |
 | `--format` | `md` | `md` or `srt` |
 | `--timed / --no-timed` | no | Timestamps in Markdown output (`[H:MM:SS]` per line) |
@@ -73,24 +78,28 @@ conure transcribe talk.wav --pretty
 ```bash
 conure models list                 # registry, download status, sizes (also --json)
 conure models download parakeet    # pre-download (~611 MB)
+conure models download parakeet-unified-en
+conure models download parakeet-v3-multilingual
 conure models remove parakeet      # free disk space
 ```
 
-Models live in `~/Library/Application Support/Conure/models/` (override with `CONURE_MODELS_DIR`). Missing models download automatically on first use.
+Models live in `~/Library/Application Support/Conure/models/` (override with `CONURE_MODELS_DIR`). FluidAudio weights are stored in its `FluidAudio/` subfolder, downloaded through the SDK and removable with `conure models remove`. Missing models download automatically on first use. `models list --json` includes the owning `engine`.
 
 | Id | Purpose | Size | Removable |
 |---|---|---|---|
 | `parakeet` | ASR — Parakeet TDT 0.6B v2 English, CoreML INT8, Neural Engine (default) | ~611 MB | Yes |
+| `parakeet-unified-en` | FluidAudio Unified EN, punctuated and capitalized | ~590 MB | Yes |
+| `parakeet-v3-multilingual` | FluidAudio Parakeet TDT v3, 25 European languages + Japanese | ~465 MB | Yes |
 | `sortformer` | Speaker diarization (≤4 speakers), used with `--speakers` | ~239 MB | No (required) |
 | `silero` | Voice activity detection, used otherwise | ~1 MB | No (required) |
 
-Only Parakeet models run on the all-CoreML engine today — other variants (multilingual, unified-EN) need CoreML conversions that don't exist in a compatible format yet.
+The original `parakeet` remains the default. FluidAudio provides the other two ASR models; Sortformer and Silero remain on speech-swift for every model.
 
 ## How it works
 
 1. **Decode** — AVFoundation extracts mono 16 kHz PCM (mp4, mov, m4a, mp3, wav, aac, aiff)
 2. **Segment** — with `--speakers`: Sortformer diarization produces speaker turns; otherwise Silero VAD finds utterances. Same-speaker turns merge into ≤25 s chunks
-3. **Transcribe** — each chunk through Parakeet TDT (30 s CoreML windows); chunk bounds become line timestamps, so a line can never blend two speakers
+3. **Transcribe** — each chunk through the selected ASR engine; chunk bounds become line timestamps, so a line can never blend two speakers
 4. **Write** — Markdown or SRT next to the input (or `--output` dir)
 
 The GUI drives the exact CLI as a subprocess (JSON progress on stdout) — one engine everywhere. Internals and repo layout are documented in [AGENTS.md](AGENTS.md).
@@ -106,8 +115,9 @@ Coding agents should follow [AGENTS.md](AGENTS.md) for project structure, conven
 
 ## Credits
 
-- [speech-swift](https://github.com/soniqo/speech-swift) (Apache-2.0) © soniqo — the inference engine, vendored with a long-file fix at `vendor/speech-swift/`
-- Parakeet TDT weights (CC-BY-4.0) © NVIDIA
+- [speech-swift](https://github.com/soniqo/speech-swift) (Apache-2.0) © soniqo — the default inference engine, vendored with a long-file fix at `vendor/speech-swift/`
+- [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) © FluidInference — Unified EN and multilingual CoreML inference
+- Parakeet weights (see each model card for license and attribution; Unified EN: CC-BY-4.0) © NVIDIA; CoreML conversions © their respective publishers
 - Sortformer © NVIDIA
 - Silero VAD (MIT)
 

@@ -10,6 +10,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "vendor/speech-swift"),
+        .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.4"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     ],
     targets: [
@@ -19,6 +20,7 @@ let package = Package(
                 .product(name: "ParakeetASR", package: "speech-swift"),
                 .product(name: "SpeechVAD", package: "speech-swift"),
                 .product(name: "AudioCommon", package: "speech-swift"),
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
         .executableTarget(

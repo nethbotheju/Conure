@@ -20,6 +20,7 @@ enum JobStatus: Equatable {
 
 struct JobConfiguration {
     var model: String?
+    var language: String?
     var speakers: [String]
     var format: String
     var timed: Bool
@@ -113,6 +114,7 @@ final class QueueStore: ObservableObject {
         process.arguments = CLI.shared.makeArguments(
             input: job.input,
             model: job.configuration.model,
+            language: job.configuration.language,
             speakers: job.configuration.speakers.isEmpty ? nil : job.configuration.speakers,
             format: job.configuration.format,
             timed: job.configuration.timed,

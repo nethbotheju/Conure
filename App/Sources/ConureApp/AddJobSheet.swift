@@ -9,6 +9,7 @@ struct AddJobSheet: View {
 
     @State private var inputs: [URL] = []
     @State private var modelId: String = "parakeet"
+    @State private var language = ""
     @State private var speakersEnabled = true
     @State private var speakerNames: [String] = ["", ""]
     @State private var format = "md"
@@ -32,8 +33,14 @@ struct AddJobSheet: View {
                 Section("Model") {
                     Picker("Model", selection: $modelId) {
                         ForEach(asrModels.filter(\.downloaded)) { row in
-                            Text(row.name).tag(row.id)
+                            Text("\(row.name) · \(row.engine == "fluidAudio" ? "FluidAudio" : "speech-swift")").tag(row.id)
                         }
+                    }
+                    if modelId == "parakeet-v3-multilingual" {
+                        TextField("Language hint (optional, e.g. fr)", text: $language)
+                        Text("Leave empty to auto-detect. Hints filter by script; Japanese auto-detects without a hint.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     if !anyModelDownloaded {
                         HStack(spacing: 4) {
@@ -112,7 +119,7 @@ struct AddJobSheet: View {
             }
             .padding()
         }
-        .frame(width: 480, height: 560)
+        .frame(width: 480, height: 600)
         .onAppear(perform: loadModels)
     }
 
@@ -181,6 +188,7 @@ struct AddJobSheet: View {
     private func add() {
         let configuration = JobConfiguration(
             model: modelId,
+            language: modelId == "parakeet-v3-multilingual" ? (language.isEmpty ? nil : language) : nil,
             speakers: validSpeakers,
             format: format,
             timed: timed,
