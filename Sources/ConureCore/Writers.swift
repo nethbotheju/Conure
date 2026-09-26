@@ -76,15 +76,27 @@ public enum TimeFormat {
     }
 
     public static func srtTimestamp(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded(.down))
-        let ms = Int(((seconds - Double(total)) * 1000).rounded())
+        srtTimestamp(milliseconds: srtMilliseconds(seconds))
+    }
+
+    public static func srtRange(_ start: Double, _ end: Double) -> String {
+        let startMilliseconds = srtMilliseconds(start)
+        let endMilliseconds = max(startMilliseconds + 1, srtMilliseconds(end))
+        return "\(srtTimestamp(milliseconds: startMilliseconds)) --> \(srtTimestamp(milliseconds: endMilliseconds))"
+    }
+
+    private static func srtMilliseconds(_ seconds: Double) -> Int {
+        guard !seconds.isNaN else { return 0 }
+        let milliseconds = (max(0, seconds) * 1000).rounded()
+        return milliseconds >= Double(Int.max) ? Int.max - 1 : Int(milliseconds)
+    }
+
+    private static func srtTimestamp(milliseconds: Int) -> String {
+        let total = milliseconds / 1000
+        let ms = milliseconds % 1000
         let h = total / 3600
         let m = (total % 3600) / 60
         let s = total % 60
         return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
-    }
-
-    public static func srtRange(_ start: Double, _ end: Double) -> String {
-        "\(srtTimestamp(start)) --> \(srtTimestamp(max(start + 0.001, end)))"
     }
 }
