@@ -40,9 +40,9 @@ final class QueueStore: ObservableObject {
 
     private var runningProcess: Process?
     private var currentJobID: UUID?
-    private var stderrTail: [String] = []
-    private var stdoutFinished = false
-    private var exitStatus: (code: Int32, reason: Process.TerminationReason)?
+    private var currentRunID: UUID?
+    private var cancelling = false
+    private var completion = JobCompletion()
 
     init() {
         NotificationCenter.default.addObserver(
@@ -67,8 +67,8 @@ final class QueueStore: ObservableObject {
 
     func remove(_ jobID: UUID) {
         if jobID == currentJobID {
+            cancelling = true
             cancelCurrent()
-            currentJobID = nil
         }
         jobs.removeAll { $0.id == jobID }
         startNextIfNeeded()
@@ -86,15 +86,15 @@ final class QueueStore: ObservableObject {
             jobs.removeAll { $0.id == jobID }
             return
         }
+        cancelling = true
         cancelCurrent()
         setStatus(jobID, .failed("Cancelled"))
-        currentJobID = nil
-        startNextIfNeeded()
     }
 
     private func cancelCurrent() {
-        runningProcess?.terminate()
-        runningProcess = nil
+        if runningProcess?.isRunning == true {
+            runningProcess?.terminate()
+        }
     }
 
     private func setStatus(_ jobID: UUID, _ status: JobStatus) {
@@ -111,6 +111,9 @@ final class QueueStore: ObservableObject {
 
     private func run(_ job: Job) {
         let jobID = job.id
+        let runID = UUID()
+        currentRunID = runID
+        cancelling = false
         let process = Process()
         process.executableURL = CLI.shared.url
         process.arguments = CLI.shared.makeArguments(
@@ -128,22 +131,18 @@ final class QueueStore: ObservableObject {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        stderrTail = []
-        stdoutFinished = false
-        exitStatus = nil
+        completion = JobCompletion()
 
         stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty,
-                  let text = String(data: data, encoding: .utf8) else {
-                handle.readabilityHandler = nil
-                return
-            }
-            let lines = text.split(separator: "\n").map(String.init)
-            Task { @MainActor in
-                self?.stderrTail.append(contentsOf: lines)
-                if self?.stderrTail.count ?? 0 > 20 {
-                    self?.stderrTail.removeFirst((self?.stderrTail.count ?? 20) - 20)
+            if data.isEmpty { handle.readabilityHandler = nil }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.currentJobID == jobID, self.currentRunID == runID else { return }
+                if data.isEmpty {
+                    self.completion.finishStderr()
+                    self.finishIfNeeded(for: jobID)
+                } else {
+                    self.completion.appendStderr(data)
                 }
             }
         }
@@ -154,7 +153,7 @@ final class QueueStore: ObservableObject {
             let records = data.isEmpty ? decoder.finish() : decoder.append(data)
             if data.isEmpty { handle.readabilityHandler = nil }
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.currentJobID == jobID else { return }
+                guard let self, self.currentJobID == jobID, self.currentRunID == runID else { return }
                 for record in records {
                     switch record {
                     case .event(let event): self.handle(event, for: jobID)
@@ -162,7 +161,7 @@ final class QueueStore: ObservableObject {
                     }
                 }
                 if data.isEmpty {
-                    self.stdoutFinished = true
+                    self.completion.finishStdout()
                     self.finishIfNeeded(for: jobID)
                 }
             }
@@ -171,9 +170,9 @@ final class QueueStore: ObservableObject {
         process.terminationHandler = { [weak self] process in
             let code = process.terminationStatus
             let reason = process.terminationReason
-            Task { @MainActor in
-                guard let self, self.currentJobID == jobID else { return }
-                self.exitStatus = (code, reason)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.currentJobID == jobID, self.currentRunID == runID else { return }
+                self.completion.exited(code: code, reason: reason)
                 self.finishIfNeeded(for: jobID)
             }
         }
@@ -183,49 +182,36 @@ final class QueueStore: ObservableObject {
             runningProcess = process
             try process.run()
         } catch {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            runningProcess = nil
             setStatus(
                 jobID,
                 .failed("Could not start CLI at \(CLI.shared.url.path): \(error.localizedDescription)")
             )
             currentJobID = nil
+            currentRunID = nil
             startNextIfNeeded()
         }
     }
 
-    private func status(of jobID: UUID) -> JobStatus? {
-        jobs.first { $0.id == jobID }?.status
-    }
-
     private func finishIfNeeded(for jobID: UUID) {
-        guard stdoutFinished, let exitStatus else { return }
+        guard currentJobID == jobID, let result = completion.result else { return }
         runningProcess = nil
-        switch status(of: jobID) {
-        case .done:
-            break
-        case .failed where exitStatus.code == 0:
-            break
-        default:
-            if exitStatus.code != 0 {
-                let message = exitStatus.reason == .uncaughtSignal
-                    ? "Terminated" : "Exited with code \(exitStatus.code)"
-                let tail = stderrTail.joined(separator: "\n")
-                setStatus(jobID, .failed(tail.isEmpty ? message : "\(message)\n\(tail)"))
-            } else {
-                setStatus(jobID, .failed("Finished without reporting output"))
-            }
-        }
+        if !cancelling { setStatus(jobID, result) }
         currentJobID = nil
+        currentRunID = nil
         startNextIfNeeded()
     }
 
     private func handle(_ event: CLIEvent, for jobID: UUID) {
         switch event.type {
         case .progress:
-            setStatus(jobID, .running(stage: event.stage ?? "", percent: event.percent ?? 0))
-        case .done:
-            setStatus(jobID, .done(output: event.outputPath ?? ""))
-        case .error:
-            setStatus(jobID, .failed(event.detail ?? "Unknown error"))
+            if !cancelling && completion.terminalEvent == nil {
+                setStatus(jobID, .running(stage: event.stage ?? "", percent: event.percent ?? 0))
+            }
+        case .done, .error:
+            completion.receive(event)
         }
     }
 }
