@@ -41,6 +41,8 @@ final class QueueStore: ObservableObject {
     private var runningProcess: Process?
     private var currentJobID: UUID?
     private var stderrTail: [String] = []
+    private var stdoutFinished = false
+    private var exitStatus: (code: Int32, reason: Process.TerminationReason)?
 
     init() {
         NotificationCenter.default.addObserver(
@@ -127,6 +129,8 @@ final class QueueStore: ObservableObject {
         process.standardOutput = stdout
         process.standardError = stderr
         stderrTail = []
+        stdoutFinished = false
+        exitStatus = nil
 
         stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -144,39 +148,33 @@ final class QueueStore: ObservableObject {
             }
         }
 
+        let decoder = JSONLinesDecoder()
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else {
-                handle.readabilityHandler = nil
-                return
-            }
-            let events: [CLIEvent] = text.split(separator: "\n").compactMap { chunk in
-                chunk.data(using: .utf8)
-                    .flatMap { try? JSONDecoder().decode(CLIEvent.self, from: $0) }
-            }
-            Task { @MainActor in
-                self?.handle(events, for: jobID)
+            let records = data.isEmpty ? decoder.finish() : decoder.append(data)
+            if data.isEmpty { handle.readabilityHandler = nil }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.currentJobID == jobID else { return }
+                for record in records {
+                    switch record {
+                    case .event(let event): self.handle(event, for: jobID)
+                    case .malformed(let message): NSLog("%@", message)
+                    }
+                }
+                if data.isEmpty {
+                    self.stdoutFinished = true
+                    self.finishIfNeeded(for: jobID)
+                }
             }
         }
 
         process.terminationHandler = { [weak self] process in
+            let code = process.terminationStatus
+            let reason = process.terminationReason
             Task { @MainActor in
                 guard let self, self.currentJobID == jobID else { return }
-                self.runningProcess = nil
-                if case .done = self.status(of: jobID) {
-                    // already finished normally
-                } else if process.terminationStatus != 0 {
-                    var message = "Exited with code \(process.terminationStatus)"
-                    if process.terminationReason == .uncaughtSignal {
-                        message = "Terminated"
-                    }
-                    let tail = self.stderrTail.joined(separator: "\n")
-                    self.setStatus(jobID, .failed(tail.isEmpty ? message : "\(message)\n\(tail)"))
-                } else {
-                    self.setStatus(jobID, .failed("Finished without reporting output"))
-                }
-                self.currentJobID = nil
-                self.startNextIfNeeded()
+                self.exitStatus = (code, reason)
+                self.finishIfNeeded(for: jobID)
             }
         }
 
@@ -198,16 +196,36 @@ final class QueueStore: ObservableObject {
         jobs.first { $0.id == jobID }?.status
     }
 
-    private func handle(_ events: [CLIEvent], for jobID: UUID) {
-        for event in events {
-            switch event.type {
-            case .progress:
-                setStatus(jobID, .running(stage: event.stage ?? "", percent: event.percent ?? 0))
-            case .done:
-                setStatus(jobID, .done(output: event.outputPath ?? ""))
-            case .error:
-                setStatus(jobID, .failed(event.detail ?? "Unknown error"))
+    private func finishIfNeeded(for jobID: UUID) {
+        guard stdoutFinished, let exitStatus else { return }
+        runningProcess = nil
+        switch status(of: jobID) {
+        case .done:
+            break
+        case .failed where exitStatus.code == 0:
+            break
+        default:
+            if exitStatus.code != 0 {
+                let message = exitStatus.reason == .uncaughtSignal
+                    ? "Terminated" : "Exited with code \(exitStatus.code)"
+                let tail = stderrTail.joined(separator: "\n")
+                setStatus(jobID, .failed(tail.isEmpty ? message : "\(message)\n\(tail)"))
+            } else {
+                setStatus(jobID, .failed("Finished without reporting output"))
             }
+        }
+        currentJobID = nil
+        startNextIfNeeded()
+    }
+
+    private func handle(_ event: CLIEvent, for jobID: UUID) {
+        switch event.type {
+        case .progress:
+            setStatus(jobID, .running(stage: event.stage ?? "", percent: event.percent ?? 0))
+        case .done:
+            setStatus(jobID, .done(output: event.outputPath ?? ""))
+        case .error:
+            setStatus(jobID, .failed(event.detail ?? "Unknown error"))
         }
     }
 }

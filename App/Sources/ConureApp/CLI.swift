@@ -1,7 +1,7 @@
 import Foundation
 
-struct CLIEvent: Codable {
-    enum Kind: String, Codable {
+struct CLIEvent: Codable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case progress
         case done
         case error
@@ -26,24 +26,6 @@ struct CLIModelRow: Codable, Identifiable {
     let sizeMB: Double
     let approxSizeMB: Int
     let notes: String
-}
-
-final class LineBuffer: @unchecked Sendable {
-    private var data = ""
-    private let lock = NSLock()
-
-    func append(_ text: String) -> [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        data += text
-        var lines = data.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        if data.hasSuffix("\n") {
-            data = ""
-        } else if !lines.isEmpty {
-            data = lines.removeLast()
-        }
-        return lines
-    }
 }
 
 final class CLI: @unchecked Sendable {
@@ -161,18 +143,20 @@ final class CLI: @unchecked Sendable {
             process.standardOutput = stdout
             process.standardError = stderr
 
-            let lines = LineBuffer()
+            let decoder = JSONLinesDecoder()
+            let stdoutFinished = DispatchSemaphore(value: 0)
             stdout.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
-                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else {
-                    handle.readabilityHandler = nil
-                    return
-                }
-                for line in lines.append(text) {
-                    if let event = line.data(using: .utf8)
-                        .flatMap({ try? JSONDecoder().decode(CLIEvent.self, from: $0) }) {
-                        onEvent(event)
+                let records = data.isEmpty ? decoder.finish() : decoder.append(data)
+                for record in records {
+                    switch record {
+                    case .event(let event): onEvent(event)
+                    case .malformed(let message): NSLog("%@", message)
                     }
+                }
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    stdoutFinished.signal()
                 }
             }
             stderr.fileHandleForReading.readabilityHandler = { handle in
@@ -182,6 +166,7 @@ final class CLI: @unchecked Sendable {
             do {
                 try process.run()
                 process.waitUntilExit()
+                stdoutFinished.wait()
                 if process.terminationStatus != 0 {
                     onEvent(CLIEvent(
                         type: .error, stage: nil, percent: nil,
