@@ -9,10 +9,14 @@ final class ModelStoreTests: XCTestCase {
         XCTAssertEqual(ModelStore.sortformer.engine, .speechSwift)
         XCTAssertEqual(ModelStore.descriptor(for: ModelStore.unified.hfRepo)?.id, ModelStore.unified.id)
         XCTAssertEqual(ModelStore.descriptor(for: ModelStore.multilingual.id)?.engine, .fluidAudio)
-        XCTAssertEqual(ModelStore.directory(for: ModelStore.unified).lastPathComponent, "parakeet-unified-en-0.6b")
-        XCTAssertEqual(ModelStore.directory(for: ModelStore.multilingual).lastPathComponent, "parakeet-tdt-0.6b-v3")
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        XCTAssertEqual(ModelStore.directory(for: ModelStore.unified, base: base).lastPathComponent, "parakeet-unified-en-0.6b")
+        XCTAssertEqual(ModelStore.directory(for: ModelStore.multilingual, base: base).lastPathComponent, "parakeet-tdt-0.6b-v3")
         XCTAssertFalse(ModelStore.unified.isRequired)
         XCTAssertTrue(ModelStore.parakeet.isDefault)
+        XCTAssertEqual(Set(ModelStore.registry.map(\.id)).count, ModelStore.registry.count)
+        XCTAssertEqual(ModelStore.registry.filter(\.isDefault).map(\.id), [ModelStore.defaultModelID])
+        XCTAssertEqual(Set(ModelStore.registry.filter(\.isRequired).map(\.id)), ["sortformer", "silero"])
     }
 }
 
