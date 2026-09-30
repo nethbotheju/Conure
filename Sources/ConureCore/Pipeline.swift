@@ -8,6 +8,13 @@ public enum TranscribePipeline {
         progress: ProgressSink? = nil
     ) async throws -> (transcript: Transcript, outputURL: URL) {
         try Task.checkCancellation()
+        let desiredOutputURL = TranscriptWriter.outputURL(
+            for: url,
+            format: options.format,
+            overrideDirectory: options.outputDirectory
+        )
+        let plannedOutputURL = try options.resolvedOutputURL
+            ?? OutputPlanner.resolve(desired: desiredOutputURL, policy: options.collisionPolicy)
         progress?(.progress(.decode, 0, url.lastPathComponent))
         let timing = ProcessInfo.processInfo.environment["CONURE_TIMING"] == "1"
         let t0 = CFAbsoluteTimeGetCurrent()
@@ -96,7 +103,19 @@ public enum TranscribePipeline {
         try Task.checkCancellation()
         progress?(.progress(.write, 0))
         let content = try TranscriptWriter.write(transcript, format: options.format, timed: options.timed)
-        let outputURL = TranscriptWriter.outputURL(for: url, format: options.format, overrideDirectory: options.outputDirectory)
+        var outputURL = plannedOutputURL
+        switch options.collisionPolicy {
+        case .replace:
+            break
+        case .fail:
+            guard !FileManager.default.fileExists(atPath: outputURL.path) else {
+                throw ConureError.outputExists(outputURL)
+            }
+        case .unique:
+            if FileManager.default.fileExists(atPath: outputURL.path) {
+                outputURL = try OutputPlanner.resolve(desired: desiredOutputURL, policy: .unique)
+            }
+        }
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -121,6 +140,7 @@ public enum TranscribePipeline {
 public enum ConureError: LocalizedError {
     case noAudioTrack(URL)
     case noSpeechDetected(URL)
+    case outputExists(URL)
 
     public var errorDescription: String? {
         switch self {
@@ -128,6 +148,8 @@ public enum ConureError: LocalizedError {
             return "Could not decode any audio from \(url.lastPathComponent)"
         case .noSpeechDetected(let url):
             return "No speech detected in \(url.lastPathComponent)"
+        case .outputExists(let url):
+            return "Output file already exists: \(url.path) — pass --replace to overwrite it or --unique to write a new file"
         }
     }
 }

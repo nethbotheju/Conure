@@ -6,6 +6,7 @@ struct AddJobSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let onAdd: ([URL], JobConfiguration) -> Void
+    let conflictsFor: ([URL], JobConfiguration) -> [String]
 
     @State private var inputs: [URL] = []
     @State private var modelId: String = "parakeet"
@@ -17,6 +18,9 @@ struct AddJobSheet: View {
     @State private var outputDirectory: URL?
     @State private var asrModels: [CLIModelRow] = []
     @State private var anyModelDownloaded = true
+    @State private var pendingAdd: (inputs: [URL], configuration: JobConfiguration)?
+    @State private var conflicts: [String] = []
+    @State private var showingConflictAlert = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -121,6 +125,13 @@ struct AddJobSheet: View {
         }
         .frame(width: 480, height: 600)
         .onAppear(perform: loadModels)
+        .alert("Existing transcripts found", isPresented: $showingConflictAlert) {
+            Button("Replace", role: .destructive) { commit(.replace) }
+            Button("Keep Both") { commit(.unique) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(conflictMessage)
+        }
     }
 
     private var canAdd: Bool {
@@ -192,9 +203,31 @@ struct AddJobSheet: View {
             speakers: validSpeakers,
             format: format,
             timed: timed,
-            outputDirectory: outputDirectory
+            outputDirectory: outputDirectory,
+            collision: nil
         )
-        onAdd(inputs, configuration)
+        let found = conflictsFor(inputs, configuration)
+        if found.isEmpty {
+            onAdd(inputs, configuration)
+            dismiss()
+        } else {
+            conflicts = found
+            pendingAdd = (inputs, configuration)
+            showingConflictAlert = true
+        }
+    }
+
+    private func commit(_ policy: CollisionPolicy) {
+        guard var pending = pendingAdd else { return }
+        pending.configuration.collision = policy
+        onAdd(pending.inputs, pending.configuration)
+        pendingAdd = nil
         dismiss()
+    }
+
+    private var conflictMessage: String {
+        let preview = conflicts.prefix(3).joined(separator: ", ")
+        let suffix = conflicts.count > 3 ? " and \(conflicts.count - 3) more" : ""
+        return "These transcripts already exist or collide: \(preview)\(suffix). Replace overwrites them; Keep Both writes new copies with numbered names."
     }
 }

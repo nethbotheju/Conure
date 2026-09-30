@@ -55,6 +55,10 @@ conure transcribe recording.m4a --speakers "Alice,Bob" --format srt
 # Multiple files (processed sequentially), custom output folder
 conure transcribe *.mp4 --speakers "Alice,Bob,Carol" --output ~/transcripts
 
+# Existing transcripts are never silently overwritten — pick a policy:
+conure transcribe meeting.mp4 --replace   # overwrite existing output
+conure transcribe meeting.mp4 --unique    # write "meeting 2.md" instead
+
 # Progress as JSON lines (for tooling); --pretty for humans
 conure transcribe talk.wav --pretty
 
@@ -71,7 +75,13 @@ conure transcribe french.wav --model parakeet-v3-multilingual --language fr
 | `--format` | `md` | `md` or `srt` |
 | `--timed / --no-timed` | no | Timestamps in Markdown output (`[H:MM:SS]` per line) |
 | `--output` | input folder | Output directory |
+| `--replace` | off | Overwrite existing output files |
+| `--unique` | off | Write to a numbered filename (`name 2.md`) when the output already exists |
 | `--pretty` | JSON lines | Human-readable progress |
+
+### Output collisions
+
+Re-running a transcription never silently overwrites an existing file: by default the CLI stops with an error if the output path is already taken, including when two inputs in the same invocation share a basename and output folder. Pass `--replace` to overwrite or `--unique` to write a numbered copy (`meeting 2.md`) that keeps the correct extension. The queue app performs the same check when jobs are added and asks whether to replace, keep both, or cancel. Output files are always written atomically after the destination is resolved.
 
 ## Models
 

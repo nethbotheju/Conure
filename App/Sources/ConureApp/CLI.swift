@@ -191,7 +191,8 @@ final class CLI: @unchecked Sendable {
         speakers: [String]?,
         format: String,
         timed: Bool,
-        output: URL?
+        output: URL?,
+        collision: CollisionPolicy? = nil
     ) -> [String] {
         var args = ["transcribe", input.path]
         if let model, !model.isEmpty {
@@ -209,6 +210,11 @@ final class CLI: @unchecked Sendable {
         }
         if let output {
             args += ["--output", output.path]
+        }
+        switch collision {
+        case .replace: args += ["--replace"]
+        case .unique: args += ["--unique"]
+        case nil: break
         }
         return args
     }
