@@ -14,7 +14,7 @@ struct CLIEvent: Codable, Sendable {
     let outputPath: String?
 }
 
-struct CLIModelRow: Codable, Identifiable {
+struct CLIModelRow: Codable, Identifiable, Sendable {
     let id: String
     let name: String
     let repo: String
@@ -97,8 +97,12 @@ final class CLI: @unchecked Sendable {
         runStreaming(["models", "download", modelId], onEvent: onEvent, onEnd: onEnd)
     }
 
-    func remove(_ modelId: String, onEnd: @escaping @Sendable () -> Void) {
-        runStreaming(["models", "remove", modelId], onEvent: { _ in }, onEnd: onEnd)
+    func remove(
+        _ modelId: String,
+        onEvent: @escaping @Sendable (CLIEvent) -> Void,
+        onEnd: @escaping @Sendable () -> Void
+    ) {
+        runStreaming(["models", "remove", modelId], onEvent: onEvent, onEnd: onEnd)
     }
 
     private func run(

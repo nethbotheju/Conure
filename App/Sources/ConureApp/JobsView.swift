@@ -57,6 +57,8 @@ struct JobsView: View {
                     .foregroundStyle(.orange)
                 Text(reason)
                     .font(.callout)
+                Button("Retry") { setup.retry() }
+                    .controlSize(.small)
             default:
                 EmptyView()
             }

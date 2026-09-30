@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import Combine
 
 enum JobStatus: Equatable {
     case queued
@@ -34,6 +35,19 @@ struct JobConfiguration {
     var outputDirectory: URL?
     var collision: CollisionPolicy?
 
+    var resolvedModelID: String {
+        if let model, !model.isEmpty { return model }
+        return CLI.defaultModelID
+    }
+
+    var requiredModelIDs: [String] {
+        speakers.isEmpty ? ["silero"] : ["sortformer"]
+    }
+
+    var modelIDsInPlay: [String] {
+        [resolvedModelID] + requiredModelIDs
+    }
+
     func desiredOutputPath(for input: URL) -> String {
         let directory = outputDirectory ?? input.deletingLastPathComponent()
         let base = input.deletingPathExtension().lastPathComponent
@@ -53,14 +67,26 @@ final class QueueStore: ObservableObject {
     @Published var jobs: [Job] = []
 
     private let executableURL: URL
+    private let coordinator: ModelCoordinator?
     private var runningProcess: Process?
     private var currentJobID: UUID?
     private var currentRunID: UUID?
     private var cancelling = false
     private var completion = JobCompletion()
+    private var operationsCancellable: AnyCancellable?
 
-    init(executableURL: URL? = nil) {
+    init(executableURL: URL? = nil, coordinator: ModelCoordinator? = nil) {
         self.executableURL = executableURL ?? CLI.shared.url
+        self.coordinator = coordinator
+        if let coordinator {
+            operationsCancellable = coordinator.$operations
+                .dropFirst()
+                .sink { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.startNextIfNeeded()
+                    }
+                }
+        }
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
@@ -81,6 +107,7 @@ final class QueueStore: ObservableObject {
         for input in inputs {
             jobs.append(Job(input: input, configuration: configuration))
         }
+        syncModelUsage()
         startNextIfNeeded()
     }
 
@@ -112,6 +139,7 @@ final class QueueStore: ObservableObject {
             cancelCurrent()
         }
         jobs.removeAll { $0.id == jobID }
+        syncModelUsage()
         startNextIfNeeded()
     }
 
@@ -122,6 +150,7 @@ final class QueueStore: ObservableObject {
         default: return
         }
         jobs[index].status = .queued
+        syncModelUsage()
         startNextIfNeeded()
     }
 
@@ -130,9 +159,11 @@ final class QueueStore: ObservableObject {
         if jobID == currentJobID {
             cancelling = true
             setStatus(jobID, .cancelled)
+            syncModelUsage()
             cancelCurrent()
         } else if jobs[index].status == .queued {
             setStatus(jobID, .cancelled)
+            syncModelUsage()
         }
     }
 
@@ -150,7 +181,9 @@ final class QueueStore: ObservableObject {
     private func startNextIfNeeded() {
         guard currentJobID == nil,
               let next = jobs.first(where: { $0.status == .queued }) else { return }
+        if coordinator?.isMutatingAny(of: next.configuration.modelIDsInPlay) == true { return }
         currentJobID = next.id
+        syncModelUsage()
         run(next)
     }
 
@@ -226,6 +259,7 @@ final class QueueStore: ObservableObject {
         do {
             setStatus(jobID, .running(stage: "starting", percent: 0))
             runningProcess = process
+            syncModelUsage()
             try process.run()
         } catch {
             stdout.fileHandleForReading.readabilityHandler = nil
@@ -239,6 +273,7 @@ final class QueueStore: ObservableObject {
             }
             currentJobID = nil
             currentRunID = nil
+            syncModelUsage()
             startNextIfNeeded()
         }
     }
@@ -249,6 +284,7 @@ final class QueueStore: ObservableObject {
         if !cancelling { setStatus(jobID, result) }
         currentJobID = nil
         currentRunID = nil
+        syncModelUsage()
         startNextIfNeeded()
     }
 
@@ -261,5 +297,21 @@ final class QueueStore: ObservableObject {
         case .done, .error:
             completion.receive(event)
         }
+    }
+
+    private func syncModelUsage() {
+        guard let coordinator else { return }
+        var usage: [String: ModelCoordinator.Usage] = [:]
+        for job in jobs {
+            switch job.status {
+            case .running:
+                usage[job.configuration.resolvedModelID, default: ModelCoordinator.Usage()].activeJobs += 1
+            case .queued:
+                usage[job.configuration.resolvedModelID, default: ModelCoordinator.Usage()].queuedJobs += 1
+            default:
+                break
+            }
+        }
+        coordinator.setInUse(usage)
     }
 }

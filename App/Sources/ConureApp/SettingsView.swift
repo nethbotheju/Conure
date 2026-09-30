@@ -2,12 +2,13 @@ import SwiftUI
 import AppKit
 
 struct SettingsView: View {
-    @EnvironmentObject private var setup: SetupStore
+    @EnvironmentObject private var store: QueueStore
+    @EnvironmentObject private var modelCoordinator: ModelCoordinator
     @State private var models: [CLIModelRow] = []
-    @State private var downloading: String?
-    @State private var downloadProgress: Double = 0
     @State private var installMessage: String?
-    @State private var modelError: String?
+    @State private var pendingRemoval: CLIModelRow?
+    @State private var pendingRemovalJobIDs: [UUID] = []
+    @State private var mutatingModelIDs: Set<String> = []
 
     private var asrModels: [CLIModelRow] { models.filter { !$0.required } }
     private var requiredModels: [CLIModelRow] { models.filter { $0.required } }
@@ -23,13 +24,22 @@ struct SettingsView: View {
         }
         .padding()
         .onAppear(perform: reload)
+        .onReceive(modelCoordinator.$operations) { operations in
+            let current = Set(operations.compactMap { id, operation -> String? in
+                if case .failed = operation { return nil }
+                return id
+            })
+            let finished = mutatingModelIDs.subtracting(current)
+            mutatingModelIDs = current
+            if !finished.isEmpty { reload() }
+        }
         .alert("Model operation failed", isPresented: Binding(
-            get: { modelError != nil },
-            set: { if !$0 { modelError = nil } }
+            get: { modelCoordinator.lastErrorMessage != nil },
+            set: { if !$0 { modelCoordinator.lastErrorMessage = nil } }
         )) {
-            Button("OK") { modelError = nil }
+            Button("OK") { modelCoordinator.lastErrorMessage = nil }
         } message: {
-            Text(modelError ?? "")
+            Text(modelCoordinator.lastErrorMessage ?? "")
         }
     }
 
@@ -57,6 +67,22 @@ struct SettingsView: View {
                 ProgressView("Loading…")
             }
         }
+        .alert("Remove Model?", isPresented: Binding(
+            get: { pendingRemoval != nil },
+            set: { if !$0 { pendingRemoval = nil } }
+        )) {
+            Button("Remove and Cancel Jobs", role: .destructive) { confirmRemoval() }
+            Button("Keep Model", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text(removalMessage)
+        }
+    }
+
+    private var removalMessage: String {
+        let count = pendingRemovalJobIDs.count
+        let verb = count == 1 ? "queued job uses" : "queued jobs use"
+        let object = count == 1 ? "this job" : "these jobs"
+        return "\(count) \(verb) \(pendingRemoval?.name ?? "this model"). Removing it will cancel \(object)."
     }
 
     @ViewBuilder
@@ -89,29 +115,84 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func statusControl(_ row: CLIModelRow) -> some View {
-        if downloading == row.id {
+        switch modelCoordinator.operations[row.id] {
+        case .downloading(let percent):
             VStack(alignment: .trailing, spacing: 2) {
-                ProgressView(value: downloadProgress / 100)
+                ProgressView(value: percent / 100)
                     .frame(width: 110)
-                Text("\(Int(downloadProgress))%")
+                Text("\(Int(percent))%")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-        } else if row.downloaded {
+        case .removing:
+            ProgressView()
+                .controlSize(.small)
+        case .failed(let reason):
             VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.0f MB", row.sizeMB))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !row.required {
-                    Button("Remove", role: .destructive) { remove(row) }
-                        .controlSize(.small)
+                Button("Retry") { modelCoordinator.download(row.id) }
+                    .controlSize(.small)
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 180, alignment: .trailing)
+            }
+        case nil:
+            if row.downloaded {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.0f MB", row.sizeMB))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !row.required {
+                        removeControl(row)
+                    }
                 }
+            } else {
+                Button("Download") { modelCoordinator.download(row.id) }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func removeControl(_ row: CLIModelRow) -> some View {
+        if modelCoordinator.inUse[row.id]?.activeJobs ?? 0 > 0 {
+            VStack(alignment: .trailing, spacing: 2) {
+                Button("Remove", role: .destructive) {}
+                    .controlSize(.small)
+                    .disabled(true)
+                    .help("In use by a running transcription")
+                Text("In use by a running job")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         } else {
-            Button("Download") { download(row) }
+            Button("Remove", role: .destructive) { requestRemoval(row) }
                 .controlSize(.small)
         }
+    }
+
+    private func requestRemoval(_ row: CLIModelRow) {
+        let queued = store.jobs.filter { job in
+            guard case .queued = job.status else { return false }
+            return job.configuration.resolvedModelID == row.id
+        }
+        if queued.isEmpty {
+            modelCoordinator.remove(row.id)
+        } else {
+            pendingRemoval = row
+            pendingRemovalJobIDs = queued.map(\.id)
+        }
+    }
+
+    private func confirmRemoval() {
+        guard let row = pendingRemoval else { return }
+        for jobID in pendingRemovalJobIDs {
+            store.cancel(jobID)
+        }
+        pendingRemoval = nil
+        modelCoordinator.remove(row.id)
     }
 
     private func tag(_ text: String, _ color: Color) -> some View {
@@ -166,33 +247,6 @@ struct SettingsView: View {
         CLI.shared.models { rows in
             Task { @MainActor in
                 models = rows
-            }
-        }
-    }
-
-    private func download(_ row: CLIModelRow) {
-        downloading = row.id
-        downloadProgress = 0
-        CLI.shared.download(row.id) { event in
-            Task { @MainActor in
-                if event.type == .progress, let percent = event.percent {
-                    downloadProgress = percent
-                } else if event.type == .error {
-                    modelError = event.detail ?? "Download failed"
-                }
-            }
-        } onEnd: {
-            Task { @MainActor in
-                downloading = nil
-                reload()
-            }
-        }
-    }
-
-    private func remove(_ row: CLIModelRow) {
-        CLI.shared.remove(row.id) {
-            Task { @MainActor in
-                reload()
             }
         }
     }

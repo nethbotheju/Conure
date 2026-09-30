@@ -3,11 +3,16 @@ import AppKit
 
 @main
 struct ConureApp: App {
-    @StateObject private var store = QueueStore()
-    @StateObject private var setup = SetupStore()
+    @StateObject private var modelCoordinator: ModelCoordinator
+    @StateObject private var store: QueueStore
+    @StateObject private var setup: SetupStore
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
+        let coordinator = ModelCoordinator()
+        _modelCoordinator = StateObject(wrappedValue: coordinator)
+        _store = StateObject(wrappedValue: QueueStore(coordinator: coordinator))
+        _setup = StateObject(wrappedValue: SetupStore(coordinator: coordinator))
     }
 
     var body: some Scene {
@@ -25,7 +30,8 @@ struct ConureApp: App {
 
         Settings {
             SettingsView()
-                .environmentObject(setup)
+                .environmentObject(store)
+                .environmentObject(modelCoordinator)
                 .frame(width: 480, height: 440)
         }
     }
