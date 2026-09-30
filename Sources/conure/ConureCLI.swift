@@ -188,6 +188,7 @@ struct ModelsCommand: ParsableCommand {
                     let kind: String
                     let engine: String
                     let downloaded: Bool
+                    let state: String
                     let required: Bool
                     let isDefault: Bool
                     let sizeMB: Double
@@ -195,13 +196,15 @@ struct ModelsCommand: ParsableCommand {
                     let notes: String
                 }
                 let rows = ModelStore.registry.map {
-                    Row(
+                    let state = ModelStore.installState(of: $0)
+                    return Row(
                         id: $0.id,
                         name: $0.displayName,
                         repo: $0.hfRepo,
                         kind: $0.kind.rawValue,
                         engine: $0.engine.rawValue,
-                        downloaded: ModelStore.isDownloaded($0),
+                        downloaded: state == .ready,
+                        state: state.rawValue,
                         required: $0.isRequired,
                         isDefault: $0.isDefault,
                         sizeMB: Double(ModelStore.diskSize(of: $0)) / 1_048_576,
@@ -227,9 +230,16 @@ struct ModelsCommand: ParsableCommand {
         }
 
         private func row(for descriptor: ModelDescriptor) -> String {
-            let status = ModelStore.isDownloaded(descriptor)
-                ? "downloaded \(formatMB(ModelStore.diskSize(of: descriptor)))"
-                : "not downloaded (~\(descriptor.approxSizeMB) MB)"
+            let status: String
+            switch ModelStore.installState(of: descriptor) {
+            case .ready:
+                status = "downloaded \(formatMB(ModelStore.diskSize(of: descriptor)))"
+            case .incomplete:
+                status = "incomplete — \(formatMB(ModelStore.diskSize(of: descriptor))) on disk, "
+                    + "re-run `conure models download \(descriptor.id)` to finish"
+            case .missing:
+                status = "not downloaded (~\(descriptor.approxSizeMB) MB)"
+            }
             let tags = [
                 descriptor.isDefault ? "default" : nil,
                 descriptor.isRequired ? "required" : nil,
@@ -294,7 +304,7 @@ struct ModelsCommand: ParsableCommand {
             guard !descriptor.isRequired else {
                 throw ValidationError("\(descriptor.displayName) is required and cannot be removed")
             }
-            guard ModelStore.isDownloaded(descriptor) else {
+            guard ModelStore.installState(of: descriptor) != .missing else {
                 throw ValidationError("\(id) is not downloaded")
             }
             try ModelStore.remove(descriptor)

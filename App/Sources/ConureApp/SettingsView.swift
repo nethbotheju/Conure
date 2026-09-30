@@ -97,6 +97,9 @@ struct SettingsView: View {
                     if row.required {
                         tag("Required", .orange)
                     }
+                    if row.installState == .incomplete {
+                        tag("Incomplete", .red)
+                    }
                     tag(row.engine == "fluidAudio" ? "FluidAudio" : "speech-swift", .blue)
                 }
                 Text(row.notes)
@@ -139,7 +142,8 @@ struct SettingsView: View {
                     .frame(maxWidth: 180, alignment: .trailing)
             }
         case nil:
-            if row.downloaded {
+            switch row.installState {
+            case .ready:
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(String(format: "%.0f MB", row.sizeMB))
                         .font(.caption)
@@ -148,7 +152,16 @@ struct SettingsView: View {
                         removeControl(row)
                     }
                 }
-            } else {
+            case .incomplete:
+                VStack(alignment: .trailing, spacing: 2) {
+                    Button("Resume") { modelCoordinator.download(row.id) }
+                        .controlSize(.small)
+                    Text(String(format: "%.0f MB on disk — incomplete", row.sizeMB))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            case .missing:
                 Button("Download") { modelCoordinator.download(row.id) }
                     .controlSize(.small)
             }

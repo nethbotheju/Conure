@@ -21,11 +21,26 @@ struct CLIModelRow: Codable, Identifiable, Sendable {
     let kind: String
     let engine: String
     let downloaded: Bool
+    let state: String? = nil
     let required: Bool
     let isDefault: Bool
     let sizeMB: Double
     let approxSizeMB: Int
     let notes: String
+
+    var installState: ModelInstallState {
+        switch state {
+        case ModelInstallState.ready.rawValue: return .ready
+        case ModelInstallState.incomplete.rawValue: return .incomplete
+        default: return downloaded ? .ready : .missing
+        }
+    }
+}
+
+enum ModelInstallState: String, Sendable {
+    case missing
+    case incomplete
+    case ready
 }
 
 final class CLI: @unchecked Sendable {
