@@ -58,6 +58,12 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Output directory (default: alongside each input file)")
     var output: URL?
 
+    @Flag(help: "Overwrite existing output files")
+    var replace: Bool = false
+
+    @Flag(help: "Write to a unique filename (e.g. \"name 2.md\") when the output already exists")
+    var unique: Bool = false
+
     @Flag(help: "Human-readable progress instead of JSON lines")
     var pretty: Bool = false
 
@@ -75,6 +81,24 @@ struct TranscribeCommand: AsyncParsableCommand {
         if let speakerList, speakerList.count > 4 {
             throw ValidationError("Maximum 4 speakers supported")
         }
+        if replace && unique {
+            throw ValidationError("--replace and --unique are mutually exclusive")
+        }
+        let collisionPolicy: OutputCollisionPolicy = replace ? .replace : (unique ? .unique : .fail)
+
+        let resolvedOutputs: [URL]
+        do {
+            resolvedOutputs = try OutputPlanner.resolveBatch(
+                sources: files,
+                format: format,
+                overrideDirectory: output,
+                policy: collisionPolicy
+            )
+        } catch {
+            if signals.isCancelled || error is CancellationError { throw ExitCode(130) }
+            emit(.error(error.localizedDescription))
+            throw error
+        }
 
         for (index, file) in files.enumerated() {
             if files.count > 1, pretty {
@@ -86,7 +110,9 @@ struct TranscribeCommand: AsyncParsableCommand {
                 speakerNames: speakerList,
                 format: format,
                 timed: timed,
-                outputDirectory: output
+                outputDirectory: output,
+                collisionPolicy: collisionPolicy,
+                resolvedOutputURL: resolvedOutputs[index]
             )
             do {
                 let (_, outputURL) = try await signals.run {

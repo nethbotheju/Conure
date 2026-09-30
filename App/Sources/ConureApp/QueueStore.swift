@@ -20,6 +20,11 @@ enum JobStatus: Equatable {
     }
 }
 
+enum CollisionPolicy: String {
+    case replace
+    case unique
+}
+
 struct JobConfiguration {
     var model: String?
     var language: String?
@@ -27,6 +32,13 @@ struct JobConfiguration {
     var format: String
     var timed: Bool
     var outputDirectory: URL?
+    var collision: CollisionPolicy?
+
+    func desiredOutputPath(for input: URL) -> String {
+        let directory = outputDirectory ?? input.deletingLastPathComponent()
+        let base = input.deletingPathExtension().lastPathComponent
+        return directory.appendingPathComponent("\(base).\(format)").path
+    }
 }
 
 struct Job: Identifiable {
@@ -70,6 +82,28 @@ final class QueueStore: ObservableObject {
             jobs.append(Job(input: input, configuration: configuration))
         }
         startNextIfNeeded()
+    }
+
+    func outputConflicts(inputs: [URL], configuration: JobConfiguration) -> [String] {
+        let queued = jobs.filter {
+            if case .queued = $0.status { return true }
+            if case .running = $0.status { return true }
+            return false
+        }
+        let claimed = Set(queued.map { $0.configuration.desiredOutputPath(for: $0.input) })
+        var counts: [String: Int] = [:]
+        for input in inputs {
+            let path = configuration.desiredOutputPath(for: input)
+            counts[path, default: 0] += 1
+        }
+        return counts.keys
+            .filter { path in
+                counts[path]! > 1
+                    || claimed.contains(path)
+                    || FileManager.default.fileExists(atPath: path)
+            }
+            .map { ($0 as NSString).lastPathComponent }
+            .sorted()
     }
 
     func remove(_ jobID: UUID) {
@@ -134,7 +168,8 @@ final class QueueStore: ObservableObject {
             speakers: job.configuration.speakers.isEmpty ? nil : job.configuration.speakers,
             format: job.configuration.format,
             timed: job.configuration.timed,
-            output: job.configuration.outputDirectory
+            output: job.configuration.outputDirectory,
+            collision: job.configuration.collision
         )
         CLI.shared.configure(process)
 

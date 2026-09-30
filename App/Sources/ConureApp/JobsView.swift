@@ -31,9 +31,14 @@ struct JobsView: View {
                 }
             }
             .sheet(isPresented: $showingAddSheet) {
-                AddJobSheet { inputs, configuration in
-                    store.add(inputs: inputs, configuration: configuration)
-                }
+                AddJobSheet(
+                    onAdd: { inputs, configuration in
+                        store.add(inputs: inputs, configuration: configuration)
+                    },
+                    conflictsFor: { inputs, configuration in
+                        store.outputConflicts(inputs: inputs, configuration: configuration)
+                    }
+                )
             }
         }
     }

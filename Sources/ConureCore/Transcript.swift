@@ -49,6 +49,8 @@ public struct TranscribeOptions: Sendable {
     public var timed: Bool
     public var outputDirectory: URL?
     public var maxChunkDuration: Double
+    public var collisionPolicy: OutputCollisionPolicy
+    public var resolvedOutputURL: URL?
 
     public init(
         modelId: String? = nil,
@@ -57,7 +59,9 @@ public struct TranscribeOptions: Sendable {
         format: OutputFormat = .markdown,
         timed: Bool = false,
         outputDirectory: URL? = nil,
-        maxChunkDuration: Double = 25.0
+        maxChunkDuration: Double = 25.0,
+        collisionPolicy: OutputCollisionPolicy = .fail,
+        resolvedOutputURL: URL? = nil
     ) {
         self.modelId = modelId
         self.language = language
@@ -66,5 +70,7 @@ public struct TranscribeOptions: Sendable {
         self.timed = timed
         self.outputDirectory = outputDirectory
         self.maxChunkDuration = maxChunkDuration
+        self.collisionPolicy = collisionPolicy
+        self.resolvedOutputURL = resolvedOutputURL
     }
 }
