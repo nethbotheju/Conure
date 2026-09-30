@@ -7,6 +7,7 @@ enum JobStatus: Equatable {
     case running(stage: String, percent: Double)
     case done(output: String)
     case failed(String)
+    case cancelled
 
     var label: String {
         switch self {
@@ -14,6 +15,7 @@ enum JobStatus: Equatable {
         case .running: return "Transcribing"
         case .done: return "Done"
         case .failed: return "Failed"
+        case .cancelled: return "Cancelled"
         }
     }
 }
@@ -38,20 +40,25 @@ struct Job: Identifiable {
 final class QueueStore: ObservableObject {
     @Published var jobs: [Job] = []
 
+    private let executableURL: URL
     private var runningProcess: Process?
     private var currentJobID: UUID?
     private var currentRunID: UUID?
     private var cancelling = false
     private var completion = JobCompletion()
 
-    init() {
+    init(executableURL: URL? = nil) {
+        self.executableURL = executableURL ?? CLI.shared.url
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.runningProcess?.terminate()
+                if let process = self?.runningProcess, process.isRunning {
+                    process.terminate()
+                    process.waitUntilExit()
+                }
             }
         }
     }
@@ -75,20 +82,24 @@ final class QueueStore: ObservableObject {
     }
 
     func retry(_ jobID: UUID) {
-        guard let index = jobs.firstIndex(where: { $0.id == jobID }),
-              case .failed = jobs[index].status else { return }
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        switch jobs[index].status {
+        case .failed, .cancelled: break
+        default: return
+        }
         jobs[index].status = .queued
         startNextIfNeeded()
     }
 
     func cancel(_ jobID: UUID) {
-        guard jobID == currentJobID else {
-            jobs.removeAll { $0.id == jobID }
-            return
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        if jobID == currentJobID {
+            cancelling = true
+            setStatus(jobID, .cancelled)
+            cancelCurrent()
+        } else if jobs[index].status == .queued {
+            setStatus(jobID, .cancelled)
         }
-        cancelling = true
-        cancelCurrent()
-        setStatus(jobID, .failed("Cancelled"))
     }
 
     private func cancelCurrent() {
@@ -115,7 +126,7 @@ final class QueueStore: ObservableObject {
         currentRunID = runID
         cancelling = false
         let process = Process()
-        process.executableURL = CLI.shared.url
+        process.executableURL = executableURL
         process.arguments = CLI.shared.makeArguments(
             input: job.input,
             model: job.configuration.model,
@@ -185,10 +196,12 @@ final class QueueStore: ObservableObject {
             stdout.fileHandleForReading.readabilityHandler = nil
             stderr.fileHandleForReading.readabilityHandler = nil
             runningProcess = nil
-            setStatus(
-                jobID,
-                .failed("Could not start CLI at \(CLI.shared.url.path): \(error.localizedDescription)")
-            )
+            if !cancelling {
+                setStatus(
+                    jobID,
+                    .failed("Could not start CLI at \(executableURL.path): \(error.localizedDescription)")
+                )
+            }
             currentJobID = nil
             currentRunID = nil
             startNextIfNeeded()

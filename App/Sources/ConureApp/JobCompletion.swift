@@ -29,6 +29,7 @@ struct JobCompletion {
 
     var result: JobStatus? {
         guard stdoutFinished, stderrFinished, let exitStatus else { return nil }
+        if exitStatus.code == 130, exitStatus.reason == .exit { return .cancelled }
         if exitStatus.code == 0, exitStatus.reason == .exit {
             switch terminalEvent?.type {
             case .done:

@@ -7,11 +7,13 @@ public enum TranscribePipeline {
         options: TranscribeOptions,
         progress: ProgressSink? = nil
     ) async throws -> (transcript: Transcript, outputURL: URL) {
+        try Task.checkCancellation()
         progress?(.progress(.decode, 0, url.lastPathComponent))
         let timing = ProcessInfo.processInfo.environment["CONURE_TIMING"] == "1"
         let t0 = CFAbsoluteTimeGetCurrent()
 
         let samples = try AudioDecoder.loadMono16k(from: url)
+        try Task.checkCancellation()
         let duration = AudioDecoder.duration(of: samples)
         guard !samples.isEmpty else {
             throw ConureError.noAudioTrack(url)
@@ -25,6 +27,7 @@ public enum TranscribePipeline {
             progress: progress
         )
         try await transcriber.warmUp()
+        try Task.checkCancellation()
         if timing { FileHandle.standardError.write(Data("[timing] asr-load \(CFAbsoluteTimeGetCurrent() - tLoad)s\n".utf8)) }
 
         let diarize = options.speakerNames != nil && !(options.speakerNames ?? []).isEmpty
@@ -34,19 +37,23 @@ public enum TranscribePipeline {
             let tDiar = CFAbsoluteTimeGetCurrent()
             let diarizer = try await Diarizer.load(progress: progress)
             if timing { FileHandle.standardError.write(Data("[timing] diar-load \(CFAbsoluteTimeGetCurrent() - tDiar)s\n".utf8)) }
+            try Task.checkCancellation()
             progress?(.progress(.diarize, 0))
             let turns = diarizer.turns(audio: samples, sampleRate: SampleRate.mono16k) { fraction, detail in
                 progress?(.progress(.diarize, Double(fraction) * 100, detail))
-                return true
+                return !Task.isCancelled
             }
+            try Task.checkCancellation()
             rawSegments = turns.map { RawSegment(start: $0.start, end: $0.end, speaker: $0.speaker) }
             if timing { FileHandle.standardError.write(Data("[timing] diarize \(CFAbsoluteTimeGetCurrent() - tDiar)s\n".utf8)) }
             progress?(.progress(.diarize, 100, "\(turns.count) turns"))
         } else {
             let tVad = CFAbsoluteTimeGetCurrent()
             let vad = try await VoiceActivityDetector.load(progress: progress)
+            try Task.checkCancellation()
             progress?(.progress(.vad, 0))
             rawSegments = vad.speechSegments(audio: samples, sampleRate: SampleRate.mono16k)
+            try Task.checkCancellation()
             if timing { FileHandle.standardError.write(Data("[timing] vad \(CFAbsoluteTimeGetCurrent() - tVad)s\n".utf8)) }
             progress?(.progress(.vad, 100, "\(rawSegments.count) utterances"))
         }
@@ -59,8 +66,10 @@ public enum TranscribePipeline {
         var lines: [TranscriptLine] = []
         let tAsr = CFAbsoluteTimeGetCurrent()
         for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
             let slice = AudioDecoder.slice(samples, from: chunk.start, to: chunk.end, sampleRate: SampleRate.mono16k)
             let text = try await transcriber.transcribe(slice, sampleRate: SampleRate.mono16k, language: options.language)
+            try Task.checkCancellation()
             if !text.isEmpty {
                 lines.append(TranscriptLine(start: chunk.start, end: chunk.end, speaker: chunk.speaker, text: text))
             }
@@ -84,6 +93,7 @@ public enum TranscribePipeline {
             lines: lines
         )
 
+        try Task.checkCancellation()
         progress?(.progress(.write, 0))
         let content = try TranscriptWriter.write(transcript, format: options.format, timed: options.timed)
         let outputURL = TranscriptWriter.outputURL(for: url, format: options.format, overrideDirectory: options.outputDirectory)
@@ -91,7 +101,17 @@ public enum TranscribePipeline {
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try content.write(to: outputURL, atomically: true, encoding: .utf8)
+        let temporaryURL = outputURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(outputURL.lastPathComponent).\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        try content.write(to: temporaryURL, atomically: true, encoding: .utf8)
+        try Task.checkCancellation()
+        let result = temporaryURL.withUnsafeFileSystemRepresentation { source in
+            outputURL.withUnsafeFileSystemRepresentation { destination in
+                rename(source!, destination!)
+            }
+        }
+        guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         progress?(.progress(.write, 100))
 
         return (transcript, outputURL)

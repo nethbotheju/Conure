@@ -89,7 +89,16 @@ struct JobsView: View {
                                 )
                             }
                         }
+                        if job.status == .queued {
+                            Button("Cancel") { store.cancel(job.id) }
+                        }
+                        if case .running = job.status {
+                            Button("Cancel") { store.cancel(job.id) }
+                        }
                         if case .failed = job.status {
+                            Button("Retry") { store.retry(job.id) }
+                        }
+                        if job.status == .cancelled {
                             Button("Retry") { store.retry(job.id) }
                         }
                         Button("Remove", role: .destructive) { store.remove(job.id) }
@@ -159,6 +168,9 @@ struct JobRow: View {
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
+        case .cancelled:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -177,6 +189,8 @@ struct JobRow: View {
             Text(reason)
                 .foregroundStyle(.orange)
                 .lineLimit(2)
+        case .cancelled:
+            Text("Cancelled").foregroundStyle(.secondary)
         }
     }
 
