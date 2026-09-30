@@ -67,6 +67,19 @@ final class JobCompletionTests: XCTestCase {
         XCTAssertEqual(completion.result, .failed("Invalid done event: missing output path"))
     }
 
+    func testCancellationExitWinsOverTerminalEventsAndDiagnostics() {
+        for event in [done, error] {
+            var completion = JobCompletion()
+            completion.receive(event)
+            completion.appendStderr(Data("ignored diagnostic".utf8))
+            completion.exited(code: 130, reason: .exit)
+            completion.finishStdout()
+            XCTAssertNil(completion.result)
+            completion.finishStderr()
+            XCTAssertEqual(completion.result, .cancelled)
+        }
+    }
+
     func testNonzeroExitDoesNotAcceptDone() {
         var completion = JobCompletion()
         completion.receive(done)

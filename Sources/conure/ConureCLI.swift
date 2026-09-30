@@ -66,6 +66,7 @@ struct TranscribeCommand: AsyncParsableCommand {
 
     mutating func run() async throws {
         let sink: ProgressSink = pretty ? prettySink : jsonSink
+        let signals = CancellationSignals()
 
         let speakerList = speakers?
             .split(separator: ",")
@@ -88,10 +89,14 @@ struct TranscribeCommand: AsyncParsableCommand {
                 outputDirectory: output
             )
             do {
-                let (_, outputURL) = try await TranscribePipeline.transcribeFile(file, options: options, progress: sink)
-                let event = ConureEvent.done(outputURL.path)
-                emit(event)
+                let (_, outputURL) = try await signals.run {
+                    try await TranscribePipeline.transcribeFile(file, options: options, progress: sink)
+                }
+                emit(.done(outputURL.path))
             } catch {
+                if signals.isCancelled || error is CancellationError {
+                    throw ExitCode(130)
+                }
                 emit(.error(error.localizedDescription))
                 throw error
             }
@@ -225,13 +230,22 @@ struct ModelsCommand: ParsableCommand {
             guard let descriptor = ModelStore.descriptor(for: id) else {
                 throw ValidationError("Unknown model: \(id). Run `conure models list` for ids.")
             }
-            try await ModelStore.download(descriptor) { event in
-                if pretty {
-                    let pct = max(0, min(100, Int(event.percent ?? 0)))
-                    FileHandle.standardError.write(Data("\rDownloading \(descriptor.id): \(pct)%".utf8))
-                } else {
-                    emitJSONLine(event)
+            let signals = CancellationSignals()
+            let pretty = pretty
+            do {
+                try await signals.run {
+                    try await ModelStore.download(descriptor) { event in
+                        if pretty {
+                            let pct = max(0, min(100, Int(event.percent ?? 0)))
+                            FileHandle.standardError.write(Data("\rDownloading \(descriptor.id): \(pct)%".utf8))
+                        } else {
+                            emitJSONLine(event)
+                        }
+                    }
                 }
+            } catch {
+                if signals.isCancelled || error is CancellationError { throw ExitCode(130) }
+                throw error
             }
             if pretty {
                 FileHandle.standardError.write(Data("\nDownloaded \(descriptor.id)\n".utf8))
