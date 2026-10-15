@@ -23,28 +23,32 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      CONURE_BUILD_REF: refs/heads/main
+      COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
-      - name: Build and assemble dev app
-        run: scripts/make-app.sh 0.1.0-dev dev
-
-      - name: Verify app identity and signature
+      - name: Build, assemble and verify dev app
+        env:
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
-          APP="dist/Conure Dev.app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist")" = 'com.conure.app.dev'
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$APP/Contents/Info.plist")" = 'Conure Dev'
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconFile' "$APP/Contents/Info.plist")" = 'AppIcon-Dev'
-          test -x "$APP/Contents/Helpers/conure"
-          codesign --verify --deep --strict "$APP"
+          test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
+          scripts/make-app.sh 0.1.0-dev dev
+          printf 'Source commit: `%s`\n\nSource ref: `%s`\n' "$COMMIT_SHA" "$CONURE_BUILD_REF" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$CI_RUN_URL" ]; then
+            printf '\nTriggering CI run: %s\n' "$CI_RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Package ZIP and checksum
         id: package
-        env:
-          COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           DATE="$(date -u +%Y%m%d)"
           SHORT_SHA="${COMMIT_SHA:0:7}"
@@ -53,13 +57,19 @@ jobs:
           cd dist
           ditto -c -k --sequesterRsrc --keepParent 'Conure Dev.app' "$NAME.zip"
           shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256"
+          shasum -a 256 -c "$NAME.zip.sha256"
+
+      - name: Attest final dev ZIP
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/${{ steps.package.outputs.name }}.zip
 
       - name: Upload installable dev build
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.name }}
           path: |
-            dist/*.zip
-            dist/*.sha256
+            dist/${{ steps.package.outputs.name }}.zip
+            dist/${{ steps.package.outputs.name }}.zip.sha256
           retention-days: 14
           if-no-files-found: error

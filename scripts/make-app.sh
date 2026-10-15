@@ -5,6 +5,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT/.build/release"
 VERSION="${1:-0.1.0}"
 VARIANT="${2:-stable}"
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "error: invalid version: $VERSION" >&2
+  exit 1
+fi
+SOURCE_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+SOURCE_REF="${CONURE_BUILD_REF:-${GITHUB_REF:-$(git -C "$ROOT" symbolic-ref -q HEAD || echo detached)}}"
+BUILD_URL=""
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  BUILD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+fi
 case "$VARIANT" in
   stable)
     APP_NAME="Conure"
@@ -73,9 +83,15 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+PLIST="$APP/Contents/Info.plist"
+plutil -insert ConureSourceCommit -string "$SOURCE_COMMIT" "$PLIST"
+plutil -insert ConureSourceRef -string "$SOURCE_REF" "$PLIST"
+plutil -insert ConureBuildURL -string "$BUILD_URL" "$PLIST"
+
 echo "Ad-hoc codesigning…"
 codesign --force --sign - "$APP/Contents/Helpers/conure"
 codesign --force --sign - "$APP"
+"$ROOT/scripts/verify-app.sh" "$APP" "$VERSION" "$VARIANT"
 
 echo
 echo "Done: $APP"
