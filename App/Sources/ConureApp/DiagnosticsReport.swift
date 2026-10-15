@@ -52,9 +52,10 @@ struct DiagnosticsReport: Sendable {
 
     var versionStatus: String {
         switch versionsMismatch {
-        case true: "WARNING: App and bundled CLI versions do not match."
-        case false: "App and bundled CLI versions match."
-        case nil: "App / bundled CLI version comparison unavailable."
+        case .some(let mismatch):
+            mismatch ? "WARNING: App and bundled CLI versions do not match." : "App and bundled CLI versions match."
+        case .none:
+            "App / bundled CLI version comparison unavailable."
         }
     }
 
