@@ -21,7 +21,7 @@ struct CLIModelRow: Codable, Identifiable, Sendable {
     let kind: String
     let engine: String
     let downloaded: Bool
-    let state: String? = nil
+    var state: String? = nil
     let required: Bool
     let isDefault: Bool
     let sizeMB: Double
@@ -32,6 +32,7 @@ struct CLIModelRow: Codable, Identifiable, Sendable {
         switch state {
         case ModelInstallState.ready.rawValue: return .ready
         case ModelInstallState.incomplete.rawValue: return .incomplete
+        case ModelInstallState.missing.rawValue: return .missing
         default: return downloaded ? .ready : .missing
         }
     }
@@ -70,9 +71,12 @@ final class CLI: @unchecked Sendable {
         }
     }
 
+    var bundledURL: URL {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/conure")
+    }
+
     var url: URL {
-        let bundle = Bundle.main.bundleURL
-        let bundled = bundle.appendingPathComponent("Contents/Helpers/conure")
+        let bundled = bundledURL
         if isDevApp { return bundled }
         if let override = ProcessInfo.processInfo.environment["CONURE_CLI_PATH"] {
             return URL(fileURLWithPath: override)
@@ -97,10 +101,30 @@ final class CLI: @unchecked Sendable {
     }
 
     func models(_ completion: @escaping @Sendable ([CLIModelRow]) -> Void) {
+        modelInventory { completion($0 ?? []) }
+    }
+
+    func modelInventory(_ completion: @escaping @Sendable ([CLIModelRow]?) -> Void) {
         run(["models", "list", "--json"]) { output in
-            let rows = output.flatMap { Data($0.utf8) }
-                .flatMap { try? JSONDecoder().decode([CLIModelRow].self, from: $0) } ?? []
-            completion(rows)
+            completion(output.flatMap { try? JSONDecoder().decode([CLIModelRow].self, from: Data($0.utf8)) })
+        }
+    }
+
+    func version(at executable: URL, completion: @escaping @Sendable (String?) -> Void) {
+        run(["--version"], executable: executable) { output in
+            completion(output?.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    func modelInventory() async -> [CLIModelRow]? {
+        await withCheckedContinuation { continuation in
+            modelInventory { continuation.resume(returning: $0) }
+        }
+    }
+
+    func version(at executable: URL) async -> String? {
+        await withCheckedContinuation { continuation in
+            version(at: executable) { continuation.resume(returning: $0) }
         }
     }
 
@@ -122,11 +146,12 @@ final class CLI: @unchecked Sendable {
 
     private func run(
         _ arguments: [String],
+        executable: URL? = nil,
         completion: @escaping @Sendable (String?) -> Void
     ) {
         queue.async { [self] in
             let process = Process()
-            process.executableURL = url
+            process.executableURL = executable ?? url
             process.arguments = arguments
             configure(process)
             process.standardOutput = Pipe()
@@ -140,7 +165,7 @@ final class CLI: @unchecked Sendable {
                 let data = (process.standardOutput as? Pipe)?
                     .fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                completion(data.flatMap { String(data: $0, encoding: .utf8) })
+                completion(process.terminationStatus == 0 ? data.flatMap { String(data: $0, encoding: .utf8) } : nil)
             } catch {
                 completion(nil)
             }

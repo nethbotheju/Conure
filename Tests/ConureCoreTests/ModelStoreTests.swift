@@ -193,13 +193,10 @@ final class ModelInstallStateTests: XCTestCase {
 
     func testAvailableDiskCapacityResolvesThroughMissingAncestors() throws {
         let deep = root.appendingPathComponent("a/b/c/d", isDirectory: true)
-        let capacity = ModelStore.availableDiskCapacity(at: deep)
-        XCTAssertNotNil(capacity)
-        XCTAssertGreaterThan(capacity!, 0)
-        XCTAssertEqual(
-            ModelStore.availableDiskCapacity(at: deep),
-            ModelStore.availableDiskCapacity(at: FileManager.default.temporaryDirectory)
-        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("a").path))
+        let capacity = try XCTUnwrap(ModelStore.availableDiskCapacity(at: deep))
+        XCTAssertGreaterThan(capacity, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("a").path))
     }
 
     func testErrorCategorization() {
