@@ -21,8 +21,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
             licensesTab
                 .tabItem { Label("Credits", systemImage: "text.book.closed") }
-            buildTab
-                .tabItem { Label("Build", systemImage: "info.circle") }
+            DiagnosticsView()
+                .tabItem { Label("About", systemImage: "info.circle") }
         }
         .padding()
         .onAppear(perform: reload)
@@ -242,39 +242,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var buildTab: some View {
-        Form {
-            Section("Build provenance") {
-                LabeledContent("Version", value: buildValue("CFBundleShortVersionString"))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Source commit").font(.headline)
-                    Text(buildValue("ConureSourceCommit")).font(.system(.caption, design: .monospaced))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Source ref / tag").font(.headline)
-                    Text(buildValue("ConureSourceRef")).font(.caption)
-                }
-                if let run = Bundle.main.object(forInfoDictionaryKey: "ConureBuildURL") as? String,
-                   !run.isEmpty, let url = URL(string: run) {
-                    Link("View GitHub Actions build", destination: url)
-                } else {
-                    Text("No GitHub Actions run (local or unpackaged build).")
-                        .font(.caption)
-                }
-            }
-            Section {
-                Text("Compare this commit and build run with the artifact’s GitHub attestation. Build metadata alone does not authenticate a download.")
-                    .font(.callout)
-            }
-        }
-        .textSelection(.enabled)
-        .formStyle(.grouped)
-    }
-
-    private func buildValue(_ key: String) -> String {
-        Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "Unavailable (unpackaged build)"
     }
 
     private var licensesTab: some View {
