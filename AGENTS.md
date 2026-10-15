@@ -53,7 +53,9 @@ Tests/ConureCoreTests/  pure-logic unit tests (no model downloads)
 
 ### Installing Conure Dev
 
-Find the latest successful **Dev build** run in [GitHub Actions](https://github.com/nethbotheju/Conure/actions/workflows/dev-build.yml) for `main` and download its `Conure-Dev-YYYYMMDD-SHA` artifact. Unzip the artifact download, verify its included ZIP with `shasum -a 256 -c *.zip.sha256`, then unzip that ZIP and move `Conure Dev.app` into `/Applications`. On first launch, right-click → **Open** if Gatekeeper prompts; the app is ad-hoc signed. Conure Dev runs its own bundled CLI and stores models in `~/Library/Application Support/Conure Dev/models/`, separate from stable Conure and the standalone CLI. To uninstall, remove `/Applications/Conure Dev.app`; optionally delete `~/Library/Application Support/Conure Dev/` to remove dev models.
+Follow the README's [development-build installation](README.md#development-builds-conure-dev) instructions: download a successful `main` Dev build artifact, extract the outer download and then the included `Conure-Dev-YYYYMMDD-SHA.zip`, and move `Conure Dev.app` into `/Applications`. Conure is open-source; both app variants are ad-hoc signed without an Apple Developer ID and are not notarized or approved by Apple. For first launch, right-click → **Open**; if blocked, use **System Settings → Privacy & Security → Open Anyway** as detailed in the README's [Gatekeeper instructions](README.md#first-launch-and-gatekeeper). Do not disable Gatekeeper globally.
+
+Conure Dev runs its own bundled CLI and stores models in `~/Library/Application Support/Conure Dev/models/`, separate from stable Conure and the standalone CLI. To uninstall, remove `/Applications/Conure Dev.app`; optionally delete `~/Library/Application Support/Conure Dev/` to remove dev models.
 
 ## Vendored speech-swift — read before touching
 

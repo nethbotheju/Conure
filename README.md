@@ -25,16 +25,34 @@ NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine), with 
 
 ## Install
 
-1. Download the latest `Conure-<version>.dmg` from [Releases](https://github.com/nethbotheju/Conure/releases).
-2. Open the DMG and drag **Conure** to **Applications**.
-3. First launch: right-click the app → **Open** (it's unsigned — see below), and the required models (~240 MB) download automatically.
-
-> **Unsigned app note:** Conure ships without a Developer ID. If macOS blocks it, right-click → **Open**, or clear the quarantine flag manually:
-> ```bash
-> xattr -cr /Applications/Conure.app
-> ```
-
 **Requirements:** macOS 15+ on Apple Silicon (M1–M4). ~860 MB of model downloads on first use (auto-managed).
+
+Conure is open-source (MIT licensed). Both stable Conure and Conure Dev are **ad-hoc signed**, not signed with an Apple Developer ID, and **not notarized by Apple**. An ad-hoc signature records code integrity but does not verify the publisher's identity or mean Apple has reviewed or approved the app. macOS Gatekeeper may therefore block first launch with an unidentified-developer or “Apple could not verify” warning.
+
+### Stable release
+
+1. Download **`Conure-<version>.dmg`** from [this repository's Releases page](https://github.com/nethbotheju/Conure/releases).
+2. Open the DMG, drag **Conure** to **Applications**, then eject the DMG.
+3. Follow [First launch and Gatekeeper](#first-launch-and-gatekeeper) below. Once the app opens, required models (~240 MB) download automatically; the selected transcription model downloads on first use.
+
+### Development builds (Conure Dev)
+
+Development builds are snapshots of `main` for testing, not stable releases. They are published as GitHub Actions artifacts, not on the Releases page, and expire after 14 days.
+
+1. Sign in to GitHub and find a successful **Dev build** run for `main` in [GitHub Actions](https://github.com/nethbotheju/Conure/actions/workflows/dev-build.yml). Download its `Conure-Dev-YYYYMMDD-SHA` artifact.
+2. Extract the outer artifact download to find `Conure-Dev-YYYYMMDD-SHA.zip`.
+3. Extract the inner ZIP and move **Conure Dev.app** to **Applications**. Follow the first-launch steps below using **Conure Dev** instead of **Conure**.
+
+Conure Dev runs its own bundled CLI and stores models in `~/Library/Application Support/Conure Dev/models/`, separate from stable Conure and the standalone CLI. Both apps can coexist. To uninstall the dev build, remove `/Applications/Conure Dev.app`; optionally delete that dev models folder to reclaim its storage.
+
+### First launch and Gatekeeper
+
+Only approve an app you intentionally downloaded from this repository and whose source you trust.
+
+1. In Finder → **Applications**, **right-click (or Control-click) Conure → Open**. If macOS offers an **Open** confirmation, confirm it.
+2. If that does not allow opening (including on macOS 15+), dismiss the warning, then open **System Settings → Privacy & Security**. Scroll to **Security** and click **Open Anyway** next to the message about Conure being blocked. This option appears after an attempted launch and is available for about an hour. Authenticate if requested, then confirm **Open**. This is an exception for this app, not a global change to Gatekeeper.
+
+If macOS reports that the app **will damage your computer**, or that it is **damaged**, stop rather than bypassing the warning. Re-download the app from this repository; if it persists, [report the exact message](https://github.com/nethbotheju/Conure/issues). Do not disable Gatekeeper globally.
 
 ## Quick start
 
