@@ -45,6 +45,44 @@ Development builds are snapshots of `main` for testing, not stable releases. The
 
 Conure Dev runs its own bundled CLI and stores models in `~/Library/Application Support/Conure Dev/models/`, separate from stable Conure and the standalone CLI. Both apps can coexist. To uninstall the dev build, remove `/Applications/Conure Dev.app`; optionally delete that dev models folder to reclaim its storage.
 
+### Verify a download
+
+New stable DMGs and development ZIPs include a `.sha256` file and a GitHub artifact attestation. Older builds may not have attestations or embedded build metadata. Verify the **original DMG or inner dev ZIP**, not the outer GitHub artifact download or an extracted app.
+
+For a stable release, download the DMG and its matching `.dmg.sha256` from the same release. In their folder, substitute the release version and full source commit shown in the release notes:
+
+```bash
+VERSION="0.2.0"
+SOURCE_COMMIT="paste-the-full-source-commit-from-the-release-notes"
+shasum -a 256 -c "Conure-$VERSION.dmg.sha256"
+gh attestation verify "Conure-$VERSION.dmg" \
+  --repo nethbotheju/Conure \
+  --signer-workflow nethbotheju/Conure/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$VERSION" \
+  --source-digest "$SOURCE_COMMIT" \
+  --deny-self-hosted-runners
+```
+
+For a development build, extract the outer artifact download, then verify the inner ZIP before extracting it. Replace `NAME` with the actual filename without `.zip`:
+
+```bash
+NAME="Conure-Dev-YYYYMMDD-SHA"
+shasum -a 256 -c "$NAME.zip.sha256"
+gh attestation verify "$NAME.zip" \
+  --repo nethbotheju/Conure \
+  --signer-workflow nethbotheju/Conure/.github/workflows/dev-build.yml \
+  --source-ref refs/heads/main \
+  --deny-self-hosted-runners
+```
+
+Use a recent [GitHub CLI](https://cli.github.com/) with `gh attestation verify` support; authenticate with `gh auth login` if requested. Verification must succeed and identify the expected repository, workflow and run. Do not treat a missing or failed attestation as success. Attestations are published to GitHub's attestations API (supported for this public repository), and linked in the workflow summary; they are not Apple signatures.
+
+After installation, open **Settings → Build** in Conure or Conure Dev. The full source commit, source ref (the tag for stable releases), version and link to the packaging run are recorded in the signed app bundle. Compare them with the stable release notes or the dev run's **Source commit** summary and triggering successful CI run. For `workflow_run` dev builds, GitHub's attestation source identity describes the **packaging workflow revision**, which can be newer than the CI commit checked out for compilation. The checked-out commit is recorded inside the attested ZIP's app metadata and in the run summary; do not assume those two revisions are identical.
+
+Checksums detect corruption but do not authenticate their own origin. Attestations bind the artifact digest to a GitHub Actions identity/run, not to Apple's approval, the safety of the code, or independently reproducible output. **Reproducible builds have not been established.** Local builds record their checkout's commit/ref but may contain uncommitted edits and have no GitHub run or attestation. Unpackaged `swift run` builds display unavailable metadata.
+
+Before publishing, workflows check app identity, embedded source metadata, bundled CLI execution and ad-hoc signatures. Stable packaging also verifies and mounts the DMG read-only, rechecks the enclosed app, and compares it with the assembled bundle. These integrity checks do not replace the [manual release validation](validation/README.md).
+
 ### First launch and Gatekeeper
 
 Only approve an app you intentionally downloaded from this repository and whose source you trust.

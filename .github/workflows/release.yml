@@ -10,79 +10,117 @@ on:
         required: false
         default: "0.1.0-dev"
 
+permissions:
+  contents: read
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build app + DMG -> draft release
+  build:
+    name: Build and verify app + DMG
     runs-on: macos-15
     permissions:
-      contents: write
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      commit: ${{ steps.ver.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Resolve version from tag or input
+      - name: Resolve version and source
         id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${GITHUB_REF_NAME}"
-            if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "tag must match vX.Y.Z (got: $TAG)" >&2
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "tag must match vX.Y.Z (got: $GITHUB_REF_NAME)" >&2
               exit 1
             fi
-            VERSION="${TAG#v}"
+            VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "invalid version: $VERSION" >&2
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Inject version into CLI
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          sed -i '' -E 's/current = ".*"/current = "${{ steps.ver.outputs.version }}"/' Sources/conure/ConureVersion.swift
+          sed -i '' -E "s/current = \".*\"/current = \"$VERSION\"/" Sources/conure/ConureVersion.swift
           grep 'current =' Sources/conure/ConureVersion.swift
 
-      - name: Build release + assemble .app + DMG
+      - name: Build, assemble and verify app + DMG
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          scripts/make-app.sh "${{ steps.ver.outputs.version }}"
-          scripts/make-dmg.sh "${{ steps.ver.outputs.version }}"
+          scripts/make-app.sh "$VERSION"
+          scripts/make-dmg.sh "$VERSION"
+          test "$(dist/Conure.app/Contents/Helpers/conure --version)" = "$VERSION"
 
       - name: Checksum
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cd dist
-          shasum -a 256 "Conure-${{ steps.ver.outputs.version }}.dmg" > "Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
-          cat "Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
+          shasum -a 256 "Conure-$VERSION.dmg" > "Conure-$VERSION.dmg.sha256"
+          shasum -a 256 -c "Conure-$VERSION.dmg.sha256"
 
-      - name: Verify CLI reports the tag version
-        run: |
-          BUILT="$(dist/Conure.app/Contents/Helpers/conure --version)"
-          echo "conure --version -> $BUILT"
-          case "$BUILT" in
-            *"${{ steps.ver.outputs.version }}"*) ;;
-            *) echo "version mismatch: expected ${{ steps.ver.outputs.version }}" >&2; exit 1 ;;
-          esac
+      - name: Attest final DMG
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/Conure-${{ steps.ver.outputs.version }}.dmg
 
-      - name: Create draft release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v${{ steps.ver.outputs.version }}"
-          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
-          gh release create "$TAG" \
-            --draft \
-            --verify-tag \
-            --generate-notes \
-            --title "Conure v${{ steps.ver.outputs.version }}" \
-            "dist/Conure-${{ steps.ver.outputs.version }}.dmg" \
-            "dist/Conure-${{ steps.ver.outputs.version }}.dmg.sha256"
-
-      - name: Upload DMG artifact (manual runs)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload verified DMG and checksum
         uses: actions/upload-artifact@v4
         with:
           name: Conure-${{ steps.ver.outputs.version }}
           path: |
-            dist/*.dmg
-            dist/*.sha256
+            dist/Conure-${{ steps.ver.outputs.version }}.dmg
+            dist/Conure-${{ steps.ver.outputs.version }}.dmg.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Create draft release
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Conure-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Publish verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          cd dist
+          sha256sum -c "Conure-$VERSION.dmg.sha256"
+          printf 'Tag: `%s`\nSource commit: `%s`\nBuild: %s/%s/actions/runs/%s\n\nVerify checksums and provenance: https://github.com/%s/blob/%s/README.md#verify-a-download\n' \
+            "$GITHUB_REF_NAME" "$SOURCE_COMMIT" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            "$GITHUB_REPOSITORY" "$SOURCE_COMMIT" > release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --generate-notes \
+            --notes-file release-notes.md \
+            --title "Conure v$VERSION" \
+            "Conure-$VERSION.dmg" \
+            "Conure-$VERSION.dmg.sha256"
