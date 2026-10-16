@@ -35,6 +35,18 @@ Conure is open-source (MIT licensed). Both stable Conure and Conure Dev are **ad
 2. Open the DMG, drag **Conure** to **Applications**, then eject the DMG.
 3. Follow [First launch and Gatekeeper](#first-launch-and-gatekeeper) below. Once the app opens, required models (~240 MB) download automatically; the selected transcription model downloads on first use.
 
+### Check for updates
+
+Choose **Conure → Check for Updates…**. The update window shows **You’re up to date** when appropriate, or the newer stable version and release notes. Choose **Download Update**, wait for signature verification and preparation, then choose **Quit & Install**. Conure quits, Sparkle replaces the app, and Conure reopens. Finish or cancel queued/running transcriptions and model operations first: the queue is not saved across restarts. Models and transcripts are not replaced. Cancelling or closing the update window cancels the update rather than scheduling installation on a later quit.
+
+Updates use [Sparkle](https://sparkle-project.org), pinned in SwiftPM. Both the feed and update archive must be signed with the publisher’s Ed25519 update key. Verification is required **before extraction**, even though the app itself is ad-hoc signed. No paid Apple Developer membership is required for this update-signing mechanism; it does not make the app notarized or Apple-approved. A build without the publisher’s public key clearly disables in-app updates instead of accepting an unsigned replacement.
+
+Checks happen only when requested, never automatically at launch or on a schedule. Sparkle fetches `https://github.com/nethbotheju/Conure/releases/latest/download/appcast.xml`; GitHub redirects this to the latest published non-prerelease release asset and may use its asset CDN. Downloads require an explicit button press and start at the matching official repository’s versioned DMG asset. The feed is cryptographically verified, including the embedded plain-text release summary; external release-note downloads are disabled. No app-provided authentication or system profiling is used. GitHub/CDN servers receive normal network metadata (including IP address and Sparkle’s app/version User-Agent). No recordings, transcripts, file paths, or model inventory are sent. Sparkle stores downloaded update data in its local cache until installation or cleanup. Browser links use your browser’s normal GitHub session/privacy settings.
+
+Only signed, newer stable semantic versions with the expected official Conure DMG URL are accepted; draft releases are inaccessible and prereleases are excluded from the stable feed. Downgrades, other repositories, package installers, and unsigned feeds/archives are refused. Network errors, malformed feeds, signature failures, disk/permission failures, and incompatible system versions produce messages rather than claiming the app is current. Sparkle handles extraction, privileged installation when necessary, replacement, and relaunch; no shell-based self-replacement is used. If running from a DMG or an app-translocated/read-only location, move Conure to Applications first. Transcription remains usable offline.
+
+**Conure Dev**, prerelease, and unpackaged builds make no stable update requests and never replace stable Conure. Dev snapshots remain manual GitHub Actions artifact installs. Older releases without an updater require one manual installation of an updater-enabled release. Publisher signing-key setup and release/upgrade testing are documented in [validation/updates.md](validation/updates.md).
+
 ### Development builds (Conure Dev)
 
 Development builds are snapshots of `main` for testing, not stable releases. They are published as GitHub Actions artifacts, not on the Releases page, and expire after 14 days.
@@ -183,6 +195,7 @@ Coding agents should follow [AGENTS.md](AGENTS.md) for project structure, conven
 
 ## Credits
 
+- [Sparkle](https://sparkle-project.org) (MIT and third-party notices) — secure in-app updates; full notices are included in the app bundle.
 - [speech-swift](https://github.com/soniqo/speech-swift) (Apache-2.0) © soniqo — the default inference engine, vendored with a long-file fix at `vendor/speech-swift/`
 - [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) © FluidInference — Unified EN and multilingual CoreML inference
 - Parakeet weights (see each model card for license and attribution; Unified EN: CC-BY-4.0) © NVIDIA; CoreML conversions © their respective publishers

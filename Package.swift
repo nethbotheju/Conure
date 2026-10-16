@@ -12,6 +12,7 @@ let package = Package(
         .package(path: "vendor/speech-swift"),
         .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.4"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [
         .target(
@@ -32,7 +33,9 @@ let package = Package(
         ),
         .executableTarget(
             name: "ConureApp",
-            path: "App/Sources/ConureApp"
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            path: "App/Sources/ConureApp",
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
             name: "ConureCoreTests",

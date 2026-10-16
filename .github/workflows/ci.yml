@@ -31,5 +31,8 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Test signed updates and disposable install/relaunch
+        run: scripts/test-updates.sh --install
+
       - name: Build (release smoke)
         run: swift build -c release
