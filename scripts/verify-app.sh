@@ -30,6 +30,25 @@ fi
 test -x "$APP/Contents/MacOS/ConureApp"
 test -x "$APP/Contents/Helpers/conure"
 test -f "$APP/Contents/Resources/$ICON.icns"
+test -d "$APP/Contents/Frameworks/Sparkle.framework"
+test -s "$APP/Contents/Resources/Sparkle-LICENSE.txt"
+codesign --verify --deep --strict "$APP/Contents/Frameworks/Sparkle.framework"
+otool -L "$APP/Contents/MacOS/ConureApp" | grep -q '@rpath/Sparkle.framework/'
+otool -l "$APP/Contents/MacOS/ConureApp" | grep -q '@executable_path/../Frameworks'
+for key in SUEnableAutomaticChecks SUAutomaticallyUpdate SUAllowsAutomaticUpdates SUEnableSystemProfiling; do
+  test "$(value "$key")" = false
+done
+for key in SURequireSignedFeed SUVerifyUpdateBeforeExtraction; do
+  test "$(value "$key")" = true
+done
+test "$(value SUSignedFeedFailureExpirationInterval)" = 0
+if [ "$VARIANT" = dev ]; then
+  ! /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST" >/dev/null 2>&1
+  ! /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$PLIST" >/dev/null 2>&1
+elif [ "${CONURE_REQUIRE_UPDATE_KEY:-false}" = true ]; then
+  test "$(value SUPublicEDKey)" = "$CONURE_UPDATE_PUBLIC_KEY"
+  test "$(value SUFeedURL)" = "https://github.com/nethbotheju/Conure/releases/latest/download/appcast.xml"
+fi
 codesign --verify --strict "$APP/Contents/Helpers/conure"
 codesign --verify --deep --strict "$APP"
 "$APP/Contents/Helpers/conure" --version

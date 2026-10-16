@@ -25,6 +25,9 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    env:
+      CONURE_UPDATE_PUBLIC_KEY: ${{ vars.CONURE_UPDATE_PUBLIC_KEY }}
+      CONURE_REQUIRE_UPDATE_KEY: ${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
     outputs:
       version: ${{ steps.ver.outputs.version }}
       commit: ${{ steps.ver.outputs.commit }}
@@ -32,6 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Resolve version and source
         id: ver
@@ -51,6 +55,9 @@ jobs:
             echo "invalid version: $VERSION" >&2
             exit 1
           fi
+          if [ "$CONURE_REQUIRE_UPDATE_KEY" = true ]; then
+            test -n "$CONURE_UPDATE_PUBLIC_KEY" || { echo 'Configure CONURE_UPDATE_PUBLIC_KEY before releasing' >&2; exit 1; }
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -68,6 +75,28 @@ jobs:
           scripts/make-app.sh "$VERSION"
           scripts/make-dmg.sh "$VERSION"
           test "$(dist/Conure.app/Contents/Helpers/conure --version)" = "$VERSION"
+
+      - name: Prepare release summary
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          printf 'Conure %s\nSource commit: %s\nBuild: %s/%s/actions/runs/%s\n\nChanges:\n' \
+            "$VERSION" "$(git rev-parse HEAD)" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > dist/release-notes.txt
+          BASE=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -n "$BASE" ]; then
+            git log "$BASE..HEAD" --format='- %s' >> dist/release-notes.txt
+          else
+            git log -20 --format='- %s' >> dist/release-notes.txt
+          fi
+          printf '\nVerify downloads: https://github.com/%s/blob/%s/README.md#verify-a-download\n' \
+            "$GITHUB_REPOSITORY" "$(git rev-parse HEAD)" >> dist/release-notes.txt
+
+      - name: Generate and verify signed stable update feed
+        if: github.event_name == 'push' && !contains(github.ref_name, '-')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: scripts/make-update.sh "$VERSION" dist/release-notes.txt
 
       - name: Checksum
         env:
@@ -89,6 +118,8 @@ jobs:
           path: |
             dist/Conure-${{ steps.ver.outputs.version }}.dmg
             dist/Conure-${{ steps.ver.outputs.version }}.dmg.sha256
+            dist/appcast.xml
+            dist/release-notes.txt
           if-no-files-found: error
 
   publish:
@@ -109,18 +140,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
-          SOURCE_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           cd dist
           sha256sum -c "Conure-$VERSION.dmg.sha256"
-          printf 'Tag: `%s`\nSource commit: `%s`\nBuild: %s/%s/actions/runs/%s\n\nVerify checksums and provenance: https://github.com/%s/blob/%s/README.md#verify-a-download\n' \
-            "$GITHUB_REF_NAME" "$SOURCE_COMMIT" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
-            "$GITHUB_REPOSITORY" "$SOURCE_COMMIT" > release-notes.md
+          EXTRA=()
+          if [[ "$VERSION" == *-* ]]; then
+            EXTRA+=(--prerelease)
+          else
+            test -s appcast.xml
+            EXTRA+=(appcast.xml)
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --draft \
             --verify-tag \
             --generate-notes \
-            --notes-file release-notes.md \
+            --notes-file release-notes.txt \
             --title "Conure v$VERSION" \
             "Conure-$VERSION.dmg" \
-            "Conure-$VERSION.dmg.sha256"
+            "Conure-$VERSION.dmg.sha256" \
+            "${EXTRA[@]}"

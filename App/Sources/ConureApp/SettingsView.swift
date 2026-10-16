@@ -246,6 +246,9 @@ struct SettingsView: View {
 
     private var licensesTab: some View {
         Form {
+            Section("Software updates") {
+                Link("Sparkle — MIT and third-party notices", destination: URL(string: "https://github.com/sparkle-project/Sparkle/blob/2.10.0/LICENSE")!)
+            }
             Section("Inference engines") {
                 Link("FluidAudio — Apache-2.0", destination: URL(string: "https://github.com/FluidInference/FluidAudio/blob/v0.17.4/LICENSE")!)
                 Link("speech-swift — Apache-2.0 (vendored)", destination: URL(string: "https://github.com/soniqo/speech-swift/blob/main/LICENSE")!)
