@@ -6,11 +6,20 @@ TOOLS="$ROOT/.build/artifacts/sparkle/Sparkle/bin"
 TEST_DIR="$(mktemp -d)"
 SERVER_PID=""
 cleanup() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    for log in server.log harness.log; do
+      if [ -f "$TEST_DIR/$log" ]; then
+        printf '\n--- %s ---\n%s\n' "$log" "$(< "$TEST_DIR/$log")" >&2
+      fi
+    done
+  fi
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
   rm -rf "$TEST_DIR"
+  return "$status"
 }
 trap cleanup EXIT
 chmod 700 "$TEST_DIR"
@@ -68,19 +77,32 @@ printf 'Test-only release notes. No application will be executed or installed.\n
 swift "$ROOT/scripts/verify-update.swift" "$TEST_DIR/feed/appcast.xml" "$TEST_DIR/feed/Conure-1.2.3.dmg" 1.2.3 "$PUBLIC_KEY"
 if [ "${1:-}" = --install ]; then
   python3 - "$TEST_DIR" > "$TEST_DIR/server.log" 2>&1 <<'PY' &
-import functools, http.server, pathlib, sys
+import functools, http.server, pathlib, socketserver, sys
+
+class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address
+
 root = pathlib.Path(sys.argv[1])
 handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root / 'feed'))
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+server = LoopbackHTTPServer(('127.0.0.1', 0), handler)
 (root / 'port').write_text(str(server.server_port))
 server.serve_forever()
 PY
   SERVER_PID=$!
-  for ((attempt=0; attempt<50; attempt++)); do
+  for ((attempt=0; attempt<300; attempt++)); do
     if [ -s "$TEST_DIR/port" ]; then break; fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo 'error: update fixture server exited before becoming ready' >&2
+      exit 1
+    fi
     sleep 0.1
   done
-  test -s "$TEST_DIR/port"
+  if [ ! -s "$TEST_DIR/port" ]; then
+    echo 'error: update fixture server did not become ready within 30 seconds' >&2
+    exit 1
+  fi
   TARGET="$TEST_DIR/installed/Conure.app"
   for MODE in cancel-early cancel-extract cancel install; do
     rm -rf "$TEST_DIR/installed"
