@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+"$ROOT/scripts/check-apple-signing.sh"
 APP="$ROOT/dist/Conure.app"
 VERSION="${1:-0.1.0}"
 DMG="$ROOT/dist/Conure-$VERSION.dmg"

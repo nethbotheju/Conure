@@ -193,6 +193,10 @@ Pull requests are welcome.
 
 Coding agents should follow [AGENTS.md](AGENTS.md) for project structure, conventions, and setup.
 
+### Future Developer ID signing
+
+Apple Developer Program membership is not required to contribute, run CI, or build ad-hoc-signed apps. Developer ID signing and notarization remain **disabled**, even with complete credentials. The [signing and notarization migration plan](validation/signing-and-notarization.md) documents credential purposes, fail-closed configuration checks, nested signing order, and the validation required before enabling a paid release path. Tag-based versioning is unchanged.
+
 ## Credits
 
 - [Sparkle](https://sparkle-project.org) (MIT and third-party notices) — secure in-app updates; full notices are included in the app bundle.
