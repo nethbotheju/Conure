@@ -37,6 +37,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Check Apple signing configuration (paid path disabled)
+        env:
+          CONURE_SIGNING_MODE: ${{ vars.CONURE_SIGNING_MODE }}
+          CONURE_SIGNING_IDENTITY: ${{ vars.CONURE_SIGNING_IDENTITY }}
+          CONURE_APPLE_TEAM_ID: ${{ vars.CONURE_APPLE_TEAM_ID }}
+          CONURE_DEVELOPER_ID_P12_BASE64: ${{ secrets.CONURE_DEVELOPER_ID_P12_BASE64 }}
+          CONURE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.CONURE_DEVELOPER_ID_P12_PASSWORD }}
+          CONURE_NOTARY_KEY_ID: ${{ vars.CONURE_NOTARY_KEY_ID }}
+          CONURE_NOTARY_ISSUER_ID: ${{ vars.CONURE_NOTARY_ISSUER_ID }}
+          CONURE_NOTARY_PRIVATE_KEY: ${{ secrets.CONURE_NOTARY_PRIVATE_KEY }}
+        run: scripts/check-apple-signing.sh
+
       - name: Resolve version and source
         id: ver
         env:

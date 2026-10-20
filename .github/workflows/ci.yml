@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test Apple signing policy (no credentials)
+        run: scripts/test-apple-signing.sh
+
       - name: Cache SPM build
         uses: actions/cache@v4
         with:

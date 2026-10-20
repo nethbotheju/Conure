@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+"$ROOT/scripts/check-apple-signing.sh"
 BUILD_DIR="$ROOT/.build/release"
 VERSION="${1:-0.1.0}"
 VARIANT="${2:-stable}"
