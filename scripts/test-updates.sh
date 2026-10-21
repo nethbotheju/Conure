@@ -8,7 +8,7 @@ SERVER_PID=""
 cleanup() {
   local status=$?
   if [ "$status" -ne 0 ]; then
-    for log in server.log harness.log; do
+    for log in server.log harness.log cycle-error; do
       if [ -f "$TEST_DIR/$log" ]; then
         printf '\n--- %s ---\n%s\n' "$log" "$(< "$TEST_DIR/$log")" >&2
       fi
@@ -33,8 +33,9 @@ try Data(key.rawRepresentation.base64EncodedString().utf8).write(to: directory.a
 try Data(key.publicKey.rawRepresentation.base64EncodedString().utf8).write(to: directory.appendingPathComponent("public-key"))
 let other = Curve25519.Signing.PrivateKey()
 try Data(other.publicKey.rawRepresentation.base64EncodedString().utf8).write(to: directory.appendingPathComponent("wrong-public-key"))
+try Data(other.rawRepresentation.base64EncodedString().utf8).write(to: directory.appendingPathComponent("wrong-private-key"))
 SWIFT
-chmod 600 "$TEST_DIR/private-key"
+chmod 600 "$TEST_DIR/private-key" "$TEST_DIR/wrong-private-key"
 PUBLIC_KEY="$(< "$TEST_DIR/public-key")"
 APP="$TEST_DIR/source/Conure.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$TEST_DIR/feed"
@@ -103,15 +104,73 @@ PY
     echo 'error: update fixture server did not become ready within 30 seconds' >&2
     exit 1
   fi
+  cp "$TEST_DIR/feed/appcast.xml" "$TEST_DIR/valid-appcast.xml"
+  cp "$TEST_DIR/feed/Conure-1.2.3.dmg" "$TEST_DIR/valid.dmg"
+  DEV_APP="$TEST_DIR/dev-source/Conure Dev.app"
+  ditto "$APP" "$DEV_APP"
+  plutil -replace CFBundleIdentifier -string com.conure.updatertest.dev "$DEV_APP/Contents/Info.plist"
+  plutil -replace CFBundleName -string 'Conure Dev' "$DEV_APP/Contents/Info.plist"
+  codesign --force --sign - "$DEV_APP" >/dev/null
+  hdiutil create -volname ConureDevUpdateTest -srcfolder "$TEST_DIR/dev-source" -format UDZO "$TEST_DIR/dev.dmg" >/dev/null
+  "$TOOLS/sign_update" --ed-key-file "$TEST_DIR/private-key" -p "$TEST_DIR/dev.dmg" > "$TEST_DIR/dev-signature"
+  "$TOOLS/sign_update" --ed-key-file "$TEST_DIR/wrong-private-key" -p "$TEST_DIR/valid.dmg" > "$TEST_DIR/wrong-signature"
   TARGET="$TEST_DIR/installed/Conure.app"
-  for MODE in cancel-early cancel-extract cancel install; do
+  for MODE in cancel-early cancel-extract cancel install reject-feed reject-feed-key reject-archive reject-archive-key reject-stable-to-dev reject-dev-payload reject-dev-to-stable; do
+    cp "$TEST_DIR/valid-appcast.xml" "$TEST_DIR/feed/appcast.xml"
+    cp "$TEST_DIR/valid.dmg" "$TEST_DIR/feed/Conure-1.2.3.dmg"
+    if [ "$MODE" = reject-dev-payload ]; then
+      cp "$TEST_DIR/dev.dmg" "$TEST_DIR/feed/Conure-1.2.3.dmg"
+    fi
+    python3 - "$TEST_DIR" "$MODE" <<'PY'
+import pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+mode = sys.argv[2]
+feed = root / 'feed/appcast.xml'
+if mode == 'reject-feed':
+    feed.write_bytes(feed.read_bytes().replace(b'Test-only', b'Tampered!'))
+elif mode == 'reject-archive':
+    archive = root / 'feed/Conure-1.2.3.dmg'
+    with archive.open('r+b') as output:
+        first = output.read(1)
+        output.seek(0)
+        output.write(bytes([first[0] ^ 1]))
+elif mode == 'reject-archive-key':
+    signature = (root / 'wrong-signature').read_text().strip()
+    feed.write_text(re.sub(r'sparkle:edSignature="[^"]+"', f'sparkle:edSignature="{signature}"', feed.read_text()))
+elif mode == 'reject-dev-payload':
+    signature = (root / 'dev-signature').read_text().strip()
+    text = re.sub(r'sparkle:edSignature="[^"]+"', f'sparkle:edSignature="{signature}"', feed.read_text())
+    size = (root / 'dev.dmg').stat().st_size
+    feed.write_text(re.sub(r'length="[0-9]+"', f'length="{size}"', text))
+elif mode == 'reject-stable-to-dev':
+    feed.write_text(feed.read_text().replace('/Conure-1.2.3.dmg', '/Conure-Dev-1.2.3.dmg'))
+PY
+    case "$MODE" in
+      reject-archive-key|reject-stable-to-dev|reject-dev-payload)
+        "$TOOLS/sign_update" --ed-key-file "$TEST_DIR/private-key" "$TEST_DIR/feed/appcast.xml"
+        "$TOOLS/sign_update" --verify --ed-key-file "$TEST_DIR/private-key" "$TEST_DIR/feed/appcast.xml"
+        ;;
+      reject-feed-key)
+        "$TOOLS/sign_update" --ed-key-file "$TEST_DIR/wrong-private-key" "$TEST_DIR/feed/appcast.xml"
+        ;;
+    esac
+    if [ "$MODE" = reject-dev-payload ]; then
+      swift "$ROOT/scripts/verify-update.swift" "$TEST_DIR/feed/appcast.xml" \
+        "$TEST_DIR/feed/Conure-1.2.3.dmg" 1.2.3 "$PUBLIC_KEY"
+    fi
     rm -rf "$TEST_DIR/installed"
-    rm -f "$TEST_DIR/failed" "$TEST_DIR/relaunched" "$TEST_DIR/cancelled"
+    rm -f "$TEST_DIR/failed" "$TEST_DIR/relaunched" "$TEST_DIR/cancelled" "$TEST_DIR/rejected" \
+      "$TEST_DIR/offered" "$TEST_DIR/ready" "$TEST_DIR/updater-started" "$TEST_DIR/cycle-error"
     mkdir -p "$TEST_DIR/installed"
     ditto "$APP" "$TARGET"
     plutil -replace CFBundleVersion -string 1.0.0 "$TARGET/Contents/Info.plist"
     plutil -replace CFBundleShortVersionString -string 1.0.0 "$TARGET/Contents/Info.plist"
+    if [ "$MODE" = reject-dev-to-stable ]; then
+      plutil -replace CFBundleIdentifier -string com.conure.updatertest.dev "$TARGET/Contents/Info.plist"
+    fi
     codesign --force --sign - "$TARGET" >/dev/null
+    rm -rf "$TEST_DIR/original.app"
+    ditto "$TARGET" "$TEST_DIR/original.app"
     printf '%s' "$MODE" > "$TEST_DIR/mode"
     "$TARGET/Contents/MacOS/ConureApp" > "$TEST_DIR/harness.log" 2>&1 &
     PID=$!
@@ -125,7 +184,8 @@ PY
         exit 1
       fi
       if [ "$MODE" = install ] && [ -f "$TEST_DIR/relaunched" ]; then break; fi
-      if [ "$MODE" != install ] && [ -f "$TEST_DIR/cancelled" ] && ! kill -0 "$PID" 2>/dev/null; then break; fi
+      if [ "$MODE" != install ] && { [ -f "$TEST_DIR/cancelled" ] || [ -f "$TEST_DIR/rejected" ]; } \
+          && ! kill -0 "$PID" 2>/dev/null; then break; fi
       sleep 1
     done
     if kill -0 "$PID" 2>/dev/null; then
@@ -144,10 +204,32 @@ PY
       sleep 2
       test ! -f "$TEST_DIR/relaunched"
       test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$TARGET/Contents/Info.plist")" = 1.0.0
+      diff -qr "$TEST_DIR/original.app" "$TARGET"
+      if [[ "$MODE" = reject-* ]]; then
+        test -s "$TEST_DIR/rejected"
+        test ! -f "$TEST_DIR/ready"
+        case "$MODE" in
+          reject-archive|reject-archive-key|reject-dev-payload) test -s "$TEST_DIR/offered" ;;
+          *) test ! -f "$TEST_DIR/offered" ;;
+        esac
+        case "$MODE" in
+          reject-feed|reject-feed-key) grep -qi 'feed is improperly signed' "$TEST_DIR/rejected" ;;
+          reject-archive|reject-archive-key) grep -qi 'update is improperly signed' "$TEST_DIR/rejected" ;;
+          reject-stable-to-dev) grep -q 'not a signed stable Conure release' "$TEST_DIR/rejected" ;;
+          reject-dev-payload) grep -q 'No suitable install' "$TEST_DIR/cycle-error" ;;
+          reject-dev-to-stable)
+            test ! -f "$TEST_DIR/updater-started"
+            grep -q 'Conure Dev uses manual' "$TEST_DIR/rejected"
+            ;;
+        esac
+        printf 'Passed %s: %s\n' "$MODE" "$(< "$TEST_DIR/rejected")"
+      fi
     fi
     codesign --verify --deep --strict "$TARGET"
   done
-  echo 'Disposable application cancellation, replacement, and relaunch tests passed.'
+  cp "$TEST_DIR/valid-appcast.xml" "$TEST_DIR/feed/appcast.xml"
+  cp "$TEST_DIR/valid.dmg" "$TEST_DIR/feed/Conure-1.2.3.dmg"
+  echo 'Disposable application cancellation, replacement, relaunch, and rejection tests passed.'
 fi
 if swift "$ROOT/scripts/verify-update.swift" "$TEST_DIR/feed/appcast.xml" "$TEST_DIR/feed/Conure-1.2.3.dmg" 1.2.3 \
     "$(< "$TEST_DIR/wrong-public-key")" >/dev/null 2>&1; then

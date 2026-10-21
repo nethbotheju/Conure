@@ -6,9 +6,11 @@ import Sparkle
 private final class FixtureDelegate: NSObject, SPUUpdaterDelegate {
     weak var driver: UpdateStore?
     let origin: String
+    let root: URL
 
     init(driver: UpdateStore, root: URL) {
         self.driver = driver
+        self.root = root
         let port = try! String(contentsOf: root.appendingPathComponent("port"), encoding: .utf8)
         origin = "http://127.0.0.1:\(port)"
     }
@@ -27,6 +29,10 @@ private final class FixtureDelegate: NSObject, SPUUpdaterDelegate {
         request.url = URL(string: "\(origin)/Conure-1.2.3.dmg")!
     }
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        if let error {
+            try? Data(String(describing: error as NSError).utf8)
+                .write(to: root.appendingPathComponent("cycle-error"), options: .atomic)
+        }
         driver?.updater(updater, didFinishUpdateCycleFor: updateCheck, error: error)
     }
 }
@@ -48,13 +54,15 @@ private final class HarnessDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        let mode = try? String(contentsOf: root.appendingPathComponent("mode"), encoding: .utf8)
         let configuration = UpdateConfiguration(
-            version: version, bundleIdentifier: "com.conure.app",
+            version: version, bundleIdentifier: mode == "reject-dev-to-stable" ? "com.conure.app.dev" : "com.conure.app",
             publicKey: Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
             feedURL: UpdateConfiguration.feedURL, isAppBundle: true,
             requiresSignedFeed: true, verifiesBeforeExtraction: true
         )
         let updates = UpdateStore(configuration: configuration, makeUpdater: { [self] driver in
+            record("updater-started", "requested")
             let proxy = FixtureDelegate(driver: driver, root: root)
             fixtureDelegate = proxy
             return SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: proxy)
@@ -83,7 +91,11 @@ private final class HarnessDelegate: NSObject, NSApplicationDelegate {
             updates.download()
         case .ready:
             record("ready", "verified")
-            if mode == "cancel" {
+            if mode?.hasPrefix("reject-") == true {
+                updates.cancel()
+                record("failed", "Invalid update reached the ready-to-install stage")
+                NSApp.terminate(nil)
+            } else if mode == "cancel" {
                 updates.cancel()
                 record("cancelled", "requested")
                 NSApp.terminate(nil)
@@ -91,7 +103,7 @@ private final class HarnessDelegate: NSObject, NSApplicationDelegate {
                 updates.install()
             }
         case .failed(let message), .unsupported(let message):
-            record("failed", message)
+            record(mode?.hasPrefix("reject-") == true ? "rejected" : "failed", message)
             NSApp.terminate(nil)
         default: break
         }

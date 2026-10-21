@@ -1,5 +1,7 @@
 # Signed in-app updates
 
+The [issue #17 architecture evaluation](automatic-update-evaluation.md) records the go/no-go decision, local evidence, key custody/recovery policy, installation matrix and remaining rollout gates. A working updater is not unrestricted production or unattended-update approval.
+
 ## Design
 
 Conure uses Sparkle 2.10.0 for archive validation, extraction, replacement, authorization, and relaunch. A custom `SPUUserDriver` provides the SwiftUI states: checking, current, available with notes, downloading with cancellation/progress, verifying/preparing, ready, and installing. Download and Quit & Install are separate user decisions. No automatic checks, downloads, installation, or system profiling are enabled.
@@ -75,7 +77,9 @@ Before distributing the first updater-enabled version, also validate the visible
 - Exercise insufficient space, read-only/DMG/translocated launch locations, unwritable Applications folders, and cancelled authorization. Confirm clear failure and preservation of the existing app.
 - Verify Conure Dev and unpackaged builds never start stable update checks.
 
-The disposable integration test exercises Sparkle's real installer helpers, signed archive verification, replacement, cancellation, and relaunch. It does not validate GitHub publication, the visible SwiftUI window, permission prompts on other accounts, or production publisher-key provisioning. Those release checks remain necessary.
+The disposable integration test exercises Sparkle's real installer helpers, signed archive verification, replacement, cancellation, and relaunch. It also rejects tampered/wrong-key feeds, same-length archive tampering, wrong-key archives inside a valid signed feed, Dev archive URLs and a validly signed, separately named/identified Dev payload. A Dev-configured host must not even construct an updater. Rejected/cancelled bundles are compared with their pre-launch snapshots and must not reach installation/relaunch. Keys and fixtures are ephemeral; no production app is modified.
+
+It does not validate GitHub publication, the visible SwiftUI window, other supported macOS versions, permission prompts on other accounts, live translocation/read-only launch, power-loss recovery or production publisher-key provisioning. Those release checks remain necessary; see the evaluation's explicit matrix and separate implementation issue draft.
 
 ## References
 
