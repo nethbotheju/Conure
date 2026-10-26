@@ -1,5 +1,7 @@
 # Signed in-app updates
 
+The go/no-go evaluation behind this design — threat model, publisher key lifecycle, installation scenarios, rollback behaviour, and trade-offs — is recorded in [`validation/updates-evaluation.md`](updates-evaluation.md). This document is the operator guide.
+
 ## Design
 
 Conure uses Sparkle 2.10.0 for archive validation, extraction, replacement, authorization, and relaunch. A custom `SPUUserDriver` provides the SwiftUI states: checking, current, available with notes, downloading with cancellation/progress, verifying/preparing, ready, and installing. Download and Quit & Install are separate user decisions. No automatic checks, downloads, installation, or system profiling are enabled.
