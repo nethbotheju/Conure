@@ -42,6 +42,9 @@ for key in SURequireSignedFeed SUVerifyUpdateBeforeExtraction; do
   test "$(value "$key")" = true
 done
 test "$(value SUSignedFeedFailureExpirationInterval)" = 0
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeRole' "$PLIST")" = "Editor"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:LSItemContentTypes' "$PLIST")" != "Array {}"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions' "$PLIST")" != "Array {}"
 if [ "$VARIANT" = dev ]; then
   ! /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST" >/dev/null 2>&1
   ! /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$PLIST" >/dev/null 2>&1

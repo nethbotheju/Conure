@@ -7,7 +7,8 @@ struct ConureApp: App {
     @StateObject private var store: QueueStore
     @StateObject private var setup: SetupStore
     @StateObject private var updates: UpdateStore
-    @NSApplicationDelegateAdaptor(UpdateApplicationDelegate.self) private var appDelegate
+    @StateObject private var inbox: ExternalOpenInbox
+    @NSApplicationDelegateAdaptor(ConureApplicationDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -31,14 +32,18 @@ struct ConureApp: App {
         _store = StateObject(wrappedValue: queue)
         _setup = StateObject(wrappedValue: SetupStore(coordinator: coordinator))
         _updates = StateObject(wrappedValue: updates)
+        let inbox = ExternalOpenInbox()
+        _inbox = StateObject(wrappedValue: inbox)
         appDelegate.updates = updates
+        appDelegate.openInbox = inbox
     }
 
     var body: some Scene {
-        WindowGroup(CLI.shared.isDevApp ? "Conure Dev" : "Conure") {
+        Window(CLI.shared.isDevApp ? "Conure Dev" : "Conure", id: "queue") {
             JobsView()
                 .environmentObject(store)
                 .environmentObject(setup)
+                .environmentObject(inbox)
                 .disabled(updates.isInstalling)
                 .frame(minWidth: 560, minHeight: 380)
                 .onAppear {
@@ -79,5 +84,19 @@ struct ConureApp: App {
                 .disabled(updates.isInstalling)
                 .frame(width: 480, height: 440)
         }
+    }
+}
+
+@MainActor
+final class ConureApplicationDelegate: NSObject, NSApplicationDelegate {
+    var updates: UpdateStore?
+    var openInbox: ExternalOpenInbox?
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        openInbox?.receive(urls)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updates?.prepareForTermination() ?? .terminateNow
     }
 }

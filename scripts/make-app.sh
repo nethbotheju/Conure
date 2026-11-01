@@ -38,6 +38,18 @@ if [ ! -f "$ROOT/App/Resources/$ICON" ]; then
   exit 1
 fi
 
+# Kept in sync with MediaImport.supportedExtensions in the app; tests enforce it.
+DOCUMENT_EXTENSIONS=(aac aif aifc aiff m4a mov mp3 mp4 wav)
+DOCUMENT_UTIS=(com.apple.m4a-audio com.apple.quicktime-movie com.microsoft.waveform-audio public.aac-audio public.aiff-audio public.mp3 public.mpeg-4)
+DOCUMENT_EXTENSION_XML=""
+for ext in "${DOCUMENT_EXTENSIONS[@]}"; do
+  DOCUMENT_EXTENSION_XML+="                <string>$ext</string>"$'\n'
+done
+DOCUMENT_UTI_XML=""
+for uti in "${DOCUMENT_UTIS[@]}"; do
+  DOCUMENT_UTI_XML+="                <string>$uti</string>"$'\n'
+done
+
 echo "Building release binaries…"
 swift build -c release --package-path "$ROOT"
 
@@ -83,6 +95,23 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <false/>
     <key>NSSupportsSuddenTermination</key>
     <false/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio or Video</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+$DOCUMENT_UTI_XML            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+$DOCUMENT_EXTENSION_XML            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF
