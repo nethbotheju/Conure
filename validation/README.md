@@ -39,6 +39,7 @@ the run.
 | C10 | Collision policy | run twice without `--replace`/`--unique` | Second run refused, existing file untouched |
 | C11 | Model manager | `models list` / `download` / `remove` | States, sizes, engine tags correct; required models non-removable |
 | C12 | GUI smoke | `swift run ConureApp` | Queue, cancel, model picker, reveal output |
+| C13 | Media import | follow [`media-import.md`](media-import.md) on the packaged app | Drag-and-drop and Finder **Open With** reach the job configuration sheet |
 
 ## Run records
 

@@ -33,7 +33,7 @@ private final class FixtureDelegate: NSObject, SPUUpdaterDelegate {
 
 @MainActor
 private final class HarnessDelegate: NSObject, NSApplicationDelegate {
-    private let termination = UpdateApplicationDelegate()
+    private let termination = ConureApplicationDelegate()
     private var observation: AnyCancellable?
     private var fixtureDelegate: FixtureDelegate?
     private var requestedTermination = false

@@ -256,12 +256,3 @@ final class UpdateStore: NSObject, ObservableObject, SPUUserDriver, SPUUpdaterDe
         }
     }
 }
-
-@MainActor
-final class UpdateApplicationDelegate: NSObject, NSApplicationDelegate {
-    var updates: UpdateStore?
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        updates?.prepareForTermination() ?? .terminateNow
-    }
-}

@@ -3,7 +3,13 @@ import SwiftUI
 struct JobsView: View {
     @EnvironmentObject private var store: QueueStore
     @EnvironmentObject private var setup: SetupStore
+    @EnvironmentObject private var inbox: ExternalOpenInbox
     @State private var showingAddSheet = false
+    @State private var sheetInputs: [URL] = []
+    @State private var sheetNotice: String?
+    @State private var isDropTargeted = false
+    @State private var showingRejectionAlert = false
+    @State private var rejectionMessage = ""
 
     var body: some View {
         NavigationStack {
@@ -12,6 +18,16 @@ struct JobsView: View {
                     emptyState
                 } else {
                     jobList
+                }
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                importMedia(urls)
+            } isTargeted: { targeted in
+                isDropTargeted = targeted
+            }
+            .overlay {
+                if isDropTargeted {
+                    dropTarget
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -23,6 +39,8 @@ struct JobsView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        sheetInputs = []
+                        sheetNotice = nil
                         showingAddSheet = true
                     } label: {
                         Image(systemName: "plus")
@@ -30,8 +48,14 @@ struct JobsView: View {
                     .help("Add files to the queue")
                 }
             }
-            .sheet(isPresented: $showingAddSheet) {
+            .sheet(isPresented: $showingAddSheet, onDismiss: {
+                sheetInputs = []
+                sheetNotice = nil
+                presentPendingImport()
+            }) {
                 AddJobSheet(
+                    inputs: sheetInputs,
+                    notice: sheetNotice,
                     onAdd: { inputs, configuration in
                         store.add(inputs: inputs, configuration: configuration)
                     },
@@ -40,7 +64,59 @@ struct JobsView: View {
                     }
                 )
             }
+            .alert("No supported files", isPresented: $showingRejectionAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(rejectionMessage)
+            }
+            .onAppear {
+                presentPendingImport()
+            }
+            .onReceive(inbox.$pending) { pending in
+                guard !pending.isEmpty else { return }
+                Task { @MainActor in presentPendingImport() }
+            }
         }
+    }
+
+    private func presentPendingImport() {
+        guard !showingAddSheet else { return }
+        importMedia(inbox.consume())
+    }
+
+    @discardableResult
+    private func importMedia(_ urls: [URL]) -> Bool {
+        let request = MediaImport.request(for: urls)
+        guard !request.accepted.isEmpty else {
+            guard !request.rejected.isEmpty else { return false }
+            rejectionMessage = "Nothing was added. " + MediaImport.rejectionSummary(for: request.rejected)
+            showingRejectionAlert = true
+            return false
+        }
+        sheetInputs = request.accepted
+        sheetNotice = request.rejected.isEmpty
+            ? nil
+            : MediaImport.rejectionSummary(for: request.rejected)
+        showingAddSheet = true
+        return true
+    }
+
+    private var dropTarget: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.down.doc")
+                .font(.system(size: 30))
+            Text("Drop to add audio or video files")
+                .font(.callout.weight(.medium))
+        }
+        .foregroundStyle(.tint)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.background.opacity(0.9)))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.tint, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+        }
+        .padding(12)
+        .allowsHitTesting(false)
     }
 
     private var setupBanner: some View {
@@ -76,7 +152,7 @@ struct JobsView: View {
                 .foregroundStyle(.secondary)
             Text("No transcriptions yet")
                 .font(.title2)
-            Text("Click + to add audio or video files.")
+            Text("Drop audio or video files here, or click + to browse.")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

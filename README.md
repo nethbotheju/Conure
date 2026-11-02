@@ -21,6 +21,7 @@ NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine), with 
 - **Lean:** the default model used ~1.7 GB peak memory in a 2-hour test; FluidAudio long-file memory is still being validated.
 - **Speaker-aware:** name up to 4 attendees and every line comes out labeled with the right speaker.
 - **App + CLI:** choose a model per job in the queue app or script the CLI with JSON output; both share the same pipeline.
+- **Native import:** drag files onto the queue window or send them to Conure from Finder's **Open With**; either way the job configuration sheet opens first.
 - **Formats:** clean Markdown with optional timestamps, or ready-to-use SRT subtitles with speaker prefixes.
 
 ## Install
@@ -108,7 +109,7 @@ If macOS reports that the app **will damage your computer**, or that it is **dam
 
 ## Quick start
 
-**App** — launch Conure, hit **＋**, drop in files (optionally name up to 4 speakers), and watch the queue run.
+**App** — launch Conure, hit **＋** or drop audio/video files onto the window (Finder's **Open With → Conure** works too), optionally name up to 4 speakers, and watch the queue run.
 
 **CLI** — install the bundled engine on your PATH from Settings, or use it straight from a build:
 

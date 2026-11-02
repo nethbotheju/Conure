@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 struct AddJobSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,7 +7,8 @@ struct AddJobSheet: View {
     let onAdd: ([URL], JobConfiguration) -> Void
     let conflictsFor: ([URL], JobConfiguration) -> [String]
 
-    @State private var inputs: [URL] = []
+    @State private var inputs: [URL]
+    @State private var notice: String?
     @State private var modelId: String = "parakeet"
     @State private var language = ""
     @State private var speakersEnabled = true
@@ -22,11 +22,28 @@ struct AddJobSheet: View {
     @State private var conflicts: [String] = []
     @State private var showingConflictAlert = false
 
+    init(
+        inputs: [URL] = [],
+        notice: String? = nil,
+        onAdd: @escaping ([URL], JobConfiguration) -> Void,
+        conflictsFor: @escaping ([URL], JobConfiguration) -> [String]
+    ) {
+        self.onAdd = onAdd
+        self.conflictsFor = conflictsFor
+        _inputs = State(initialValue: inputs)
+        _notice = State(initialValue: notice)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section("Files") {
                     filePicker
+                    if let notice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     if !inputs.isEmpty {
                         Text("\(inputs.count) file(s) selected")
                             .font(.caption)
@@ -163,11 +180,10 @@ struct AddJobSheet: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [
-            UTType.audio, UTType.movie, UTType.audiovisualContent,
-        ]
+        panel.allowedContentTypes = MediaImport.supportedContentTypes
         if panel.runModal() == .OK, !panel.urls.isEmpty {
             inputs = panel.urls
+            notice = nil
         }
     }
 
