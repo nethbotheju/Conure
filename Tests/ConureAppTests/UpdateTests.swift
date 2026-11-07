@@ -56,7 +56,9 @@ final class UpdateTests: XCTestCase {
     func testDevelopmentAndUnknownVersionsNeverStartUpdater() {
         for config in [configuration(identifier: "com.conure.app.dev"), configuration(version: nil),
                        configuration(version: "0.1.0-dev"), configuration(isApp: false), configuration(key: nil)] {
-            let store = UpdateStore(configuration: config)
+            let store = UpdateStore(configuration: config, manualCheck: { _ in
+                .current(ManualRelease(version: "0.0.0", url: URL(string: "https://example.com")!, notes: nil))
+            })
             XCTAssertFalse(store.canCheck)
             let initial = store.state
             store.check()

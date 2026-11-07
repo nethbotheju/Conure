@@ -27,7 +27,7 @@ struct ConureCLI: AsyncParsableCommand {
         commandName: "conure",
         abstract: "Local audio/video transcription with Parakeet on Apple Silicon",
         version: ConureVersion.current,
-        subcommands: [TranscribeCommand.self, ModelsCommand.self],
+        subcommands: [TranscribeCommand.self, SpeakersCommand.self, ExportCommand.self, ModelsCommand.self],
         defaultSubcommand: TranscribeCommand.self
     )
 
@@ -43,11 +43,26 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe")
     var files: [URL]
 
+    @Option(help: "Attendee names, comma-separated (max 4). Legacy: enables diarization and assigns names by first-speech order")
+    var speakers: String?
+
+    @Flag(help: "Label speakers with a detected count; name them later with `conure speakers`")
+    var diarize: Bool = false
+
+    @Option(help: "Number of speakers to keep (1–4). Enables speaker diarization")
+    var speakerCount: Int?
+
+    @Option(help: "Also write the JSON transcript record to this path")
+    var record: URL?
+
+    @Flag(help: "Save the transcript record to the Conure library")
+    var save: Bool = false
+
+    @Flag(help: "Skip writing Markdown/SRT output")
+    var noExport: Bool = false
+
     @Option(help: "Model id or full HuggingFace repo (default: parakeet)")
     var model: String?
-
-    @Option(help: "Attendee names, comma-separated (max 4). Enables speaker diarization")
-    var speakers: String?
 
     @Option(help: "Output format: md or srt")
     var format: OutputFormat = .markdown
@@ -81,23 +96,39 @@ struct TranscribeCommand: AsyncParsableCommand {
         if let speakerList, speakerList.count > 4 {
             throw ValidationError("Maximum 4 speakers supported")
         }
+        if let speakerCount {
+            try SpeakerLimits.validate(count: speakerCount)
+            if speakerList != nil {
+                throw ValidationError("--speaker-count and --speakers are mutually exclusive; --speakers sets both names and count")
+            }
+        }
         if replace && unique {
             throw ValidationError("--replace and --unique are mutually exclusive")
+        }
+        if record != nil, files.count > 1 {
+            throw ValidationError("--record accepts a single path; transcribe one file at a time or use --save")
+        }
+        if noExport && record == nil && !save {
+            throw ValidationError("--no-export needs --save or --record, otherwise nothing would be written")
         }
         let collisionPolicy: OutputCollisionPolicy = replace ? .replace : (unique ? .unique : .fail)
 
         let resolvedOutputs: [URL]
-        do {
-            resolvedOutputs = try OutputPlanner.resolveBatch(
-                sources: files,
-                format: format,
-                overrideDirectory: output,
-                policy: collisionPolicy
-            )
-        } catch {
-            if signals.isCancelled || error is CancellationError { throw ExitCode(130) }
-            emit(.error(error.localizedDescription))
-            throw error
+        if noExport {
+            resolvedOutputs = []
+        } else {
+            do {
+                resolvedOutputs = try OutputPlanner.resolveBatch(
+                    sources: files,
+                    format: format,
+                    overrideDirectory: output,
+                    policy: collisionPolicy
+                )
+            } catch {
+                if signals.isCancelled || error is CancellationError { throw ExitCode(130) }
+                emit(.error(error.localizedDescription))
+                throw error
+            }
         }
 
         for (index, file) in files.enumerated() {
@@ -108,17 +139,22 @@ struct TranscribeCommand: AsyncParsableCommand {
                 modelId: model,
                 language: language,
                 speakerNames: speakerList,
+                diarize: diarize,
+                speakerCount: speakerCount,
                 format: format,
                 timed: timed,
                 outputDirectory: output,
                 collisionPolicy: collisionPolicy,
-                resolvedOutputURL: resolvedOutputs[index]
+                resolvedOutputURL: noExport ? nil : resolvedOutputs[index],
+                recordPath: record,
+                saveToLibrary: save,
+                skipExport: noExport
             )
             do {
-                let (_, outputURL) = try await signals.run {
+                let result = try await signals.run {
                     try await TranscribePipeline.transcribeFile(file, options: options, progress: sink)
                 }
-                emit(.done(outputURL.path))
+                emit(.done(result.outputURL?.path, recordPath: result.recordURL?.path))
             } catch {
                 if signals.isCancelled || error is CancellationError {
                     throw ExitCode(130)
@@ -156,12 +192,132 @@ struct TranscribeCommand: AsyncParsableCommand {
                 FileHandle.standardError.write(Data("\r\(stage) [\(bar)] \(pct)%\(detail)".utf8))
             case .done:
                 FileHandle.standardError.write(Data("\n".utf8))
-                print("Done → \(event.outputPath ?? "")")
+                if let output = event.outputPath {
+                    print("Done → \(output)")
+                }
+                if let record = event.recordPath {
+                    print("Record → \(record)")
+                }
             case .error:
                 FileHandle.standardError.write(Data("\n".utf8))
                 print("Error: \(event.detail ?? "unknown")")
             }
         }
+    }
+}
+
+struct SpeakersCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "speakers",
+        abstract: "List or rename the speakers in a transcript record"
+    )
+
+    @Argument(help: "Transcript record (.json)")
+    var recordPath: URL
+
+    @Flag(help: "Machine-readable JSON output")
+    var json: Bool = false
+
+    @Option(name: .customLong("set"), help: "Rename a speaker: <id>=<name> (repeatable)")
+    var assignments: [String] = []
+
+    @Option(name: .customLong("clear"), help: "Clear a speaker name: <id> (repeatable)")
+    var clears: [String] = []
+
+    func run() throws {
+        var record = try RecordIO.load(recordPath)
+        var changed = false
+        for argument in assignments {
+            let (id, name) = try SpeakerName.parseAssignment(argument)
+            try record.setName(name, for: id)
+            changed = true
+        }
+        for argument in clears {
+            guard let id = Int(argument), id > 0 else {
+                throw ValidationError("Invalid speaker id \"\(argument)\"; expected a positive integer.")
+            }
+            try record.setName(nil, for: id)
+            changed = true
+        }
+        if changed {
+            try RecordIO.save(record, to: recordPath)
+        }
+
+        if json {
+            struct Row: Codable {
+                let id: Int
+                let name: String?
+                let displayName: String
+                let talkSeconds: Double
+                let segmentCount: Int
+            }
+            let rows = record.speakers.map {
+                Row(
+                    id: $0.id,
+                    name: $0.name,
+                    displayName: $0.displayName,
+                    talkSeconds: $0.talkSeconds,
+                    segmentCount: $0.segmentCount
+                )
+            }
+            let data = try JSONEncoder().encode(rows)
+            print(String(data: data, encoding: .utf8)!)
+            return
+        }
+
+        print("Speakers in \(record.title):")
+        for speaker in record.speakers {
+            let status = speaker.name == nil ? " (unnamed)" : ""
+            print("  \(speaker.id)  \(speaker.displayName)\(status)  \(TimeFormat.clock(speaker.talkSeconds))  · \(speaker.segmentCount) segments")
+        }
+    }
+}
+
+struct ExportCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "export",
+        abstract: "Render a transcript record as Markdown or SRT"
+    )
+
+    @Argument(help: "Transcript record (.json)")
+    var recordPath: URL
+
+    @Option(help: "Output format: md or srt")
+    var format: OutputFormat = .markdown
+
+    @Flag(inversion: .prefixedNo, help: "Include timestamps in Markdown output")
+    var timed: Bool = false
+
+    @Option(help: "Output path, or - for standard output (default: next to the source file)")
+    var output: String?
+
+    func run() throws {
+        let record = try RecordIO.load(recordPath)
+        let content = RecordRenderer.render(record, format: format, timed: timed)
+
+        if output == "-" {
+            print(content, terminator: "")
+            return
+        }
+
+        let destination: URL
+        if let output {
+            destination = URL(argument: output)
+                ?? URL(fileURLWithPath: output, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+        } else {
+            destination = RecordRenderer.defaultOutputURL(
+                for: record,
+                format: format,
+                fallbackDirectory: RecordLibrary.directoryURL()
+            )
+        }
+
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try content.write(to: destination, atomically: true, encoding: .utf8)
+        print(destination.path)
     }
 }
 

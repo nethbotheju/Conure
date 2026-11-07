@@ -3,8 +3,8 @@ import XCTest
 @testable import ConureApp
 
 final class JobCompletionTests: XCTestCase {
-    private let done = CLIEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: "/tmp/output.md")
-    private let error = CLIEvent(type: .error, stage: nil, percent: nil, detail: "Transcription failed", outputPath: nil)
+    private let done = CLIEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: nil, recordPath: "/tmp/output.md")
+    private let error = CLIEvent(type: .error, stage: nil, percent: nil, detail: "Transcription failed", outputPath: nil, recordPath: nil)
 
     func testAllSuccessSignalOrders() {
         for order in permutations([0, 1, 2]) {
@@ -21,7 +21,7 @@ final class JobCompletionTests: XCTestCase {
                     XCTAssertNil(completion.result, "order: \(order), step: \(index)")
                 }
             }
-            XCTAssertEqual(completion.result, .done(output: "/tmp/output.md"), "order: \(order)")
+            XCTAssertEqual(completion.result, .done(record: "/tmp/output.md"), "order: \(order)")
         }
     }
 
@@ -60,11 +60,11 @@ final class JobCompletionTests: XCTestCase {
 
     func testDoneWithoutOutputPathIsInvalid() {
         var completion = JobCompletion()
-        completion.receive(CLIEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: nil))
+        completion.receive(CLIEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: nil, recordPath: nil))
         completion.finishStdout()
         completion.finishStderr()
         completion.exited(code: 0, reason: .exit)
-        XCTAssertEqual(completion.result, .failed("Invalid done event: missing output path"))
+        XCTAssertEqual(completion.result, .failed("Invalid done event: missing record and output paths"))
     }
 
     func testCancellationExitWinsOverTerminalEventsAndDiagnostics() {
@@ -92,12 +92,12 @@ final class JobCompletionTests: XCTestCase {
     func testProgressAndLaterTerminalEventsCannotReplaceFirstTerminalEvent() {
         var completion = JobCompletion()
         completion.receive(done)
-        completion.receive(CLIEvent(type: .progress, stage: "late", percent: 99, detail: nil, outputPath: nil))
+        completion.receive(CLIEvent(type: .progress, stage: "late", percent: 99, detail: nil, outputPath: nil, recordPath: nil))
         completion.receive(error)
         completion.finishStdout()
         completion.finishStderr()
         completion.exited(code: 0, reason: .exit)
-        XCTAssertEqual(completion.result, .done(output: "/tmp/output.md"))
+        XCTAssertEqual(completion.result, .done(record: "/tmp/output.md"))
     }
 
     private func permutations(_ values: [Int]) -> [[Int]] {

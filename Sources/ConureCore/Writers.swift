@@ -2,10 +2,7 @@ import Foundation
 
 public enum TranscriptWriter {
     public static func write(_ transcript: Transcript, format: OutputFormat, timed: Bool) throws -> String {
-        switch format {
-        case .markdown: markdown(transcript, timed: timed)
-        case .srt: srt(transcript)
-        }
+        RecordRenderer.render(TranscriptRecord.make(from: transcript), format: format, timed: timed)
     }
 
     public static func outputURL(for transcript: Transcript, format: OutputFormat) -> URL {
@@ -18,51 +15,6 @@ public enum TranscriptWriter {
         let base = source.deletingPathExtension().lastPathComponent
         let directory = overrideDirectory ?? source.deletingLastPathComponent()
         return directory.appendingPathComponent("\(base).\(format.rawValue)")
-    }
-
-    private static func speakerLabel(_ transcript: Transcript, _ speaker: Int?) -> String {
-        guard let speaker else { return "" }
-        if let names = transcript.speakerNames, speaker < names.count {
-            return names[speaker]
-        }
-        return "Speaker \(speaker + 1)"
-    }
-
-    private static func markdown(_ transcript: Transcript, timed: Bool) -> String {
-        var out = "# \(transcript.sourceURL.lastPathComponent)\n\n"
-        out += "- **Duration:** \(TimeFormat.clock(transcript.audioDuration))\n"
-        if let names = transcript.speakerNames, !names.isEmpty {
-            out += "- **Attendees:** \(names.joined(separator: ", "))\n"
-        }
-        out += "- **Model:** \(transcript.modelId)\n\n## Transcript\n\n"
-
-        for line in transcript.lines {
-            var row = ""
-            if timed {
-                row += "[\(TimeFormat.clock(line.start))] "
-            }
-            if let speaker = line.speaker {
-                row += "**\(speakerLabel(transcript, speaker)):** "
-            }
-            row += line.text + "\n"
-            out += row
-        }
-        return out
-    }
-
-    private static func srt(_ transcript: Transcript) -> String {
-        var out = ""
-        for (index, line) in transcript.lines.enumerated() {
-            out += "\(index + 1)\n"
-            out += "\(TimeFormat.srtRange(line.start, line.end))\n"
-            var text = ""
-            if let speaker = line.speaker {
-                text += "\(speakerLabel(transcript, speaker)): "
-            }
-            text += line.text
-            out += text + "\n\n"
-        }
-        return out
     }
 }
 

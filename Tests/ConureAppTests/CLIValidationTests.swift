@@ -3,19 +3,17 @@ import XCTest
 @testable import ConureApp
 
 final class CLIValidationTests: XCTestCase {
-    func testArgumentGenerationPreservesOptionsAndOmitsEmptyValues() {
+    func testArgumentGenerationSavesToLibraryWithoutExports() {
         let input = URL(fileURLWithPath: "/tmp/speech clip.wav")
-        let output = URL(fileURLWithPath: "/tmp/transcripts")
         XCTAssertEqual(CLI.shared.makeArguments(
-            input: input, model: "parakeet-unified-en", language: "fr",
-            speakers: ["Ada", "Lin"], format: "srt", timed: true, output: output, collision: .unique
+            input: input, model: "parakeet-unified-en", language: "fr", speakerCount: 3
         ), [
-            "transcribe", input.path, "--model", "parakeet-unified-en", "--language", "fr",
-            "--speakers", "Ada,Lin", "--format", "srt", "--timed", "--output", output.path, "--unique",
+            "transcribe", input.path, "--save", "--no-export",
+            "--model", "parakeet-unified-en", "--language", "fr", "--speaker-count", "3",
         ])
         XCTAssertEqual(CLI.shared.makeArguments(
-            input: input, model: "", language: "", speakers: [], format: "md", timed: false, output: nil
-        ), ["transcribe", input.path, "--format", "md"])
+            input: input, model: "", language: "", speakerCount: nil
+        ), ["transcribe", input.path, "--save", "--no-export"])
     }
 
     func testCLIRejectsInvalidOptionsBeforeLoadingModels() throws {
@@ -28,6 +26,9 @@ final class CLIValidationTests: XCTestCase {
         try Data().write(to: input)
         for (arguments, expected) in [
             (["--speakers", "A,B,C,D,E"], "Maximum 4 speakers"),
+            (["--speaker-count", "5"], "Speaker count must be between 1 and 4"),
+            (["--speaker-count", "2", "--speakers", "A,B"], "mutually exclusive"),
+            (["--no-export"], "nothing would be written"),
             (["--replace", "--unique"], "mutually exclusive"),
             (["--format", "txt"], "invalid for '--format"),
         ] {
@@ -36,6 +37,7 @@ final class CLIValidationTests: XCTestCase {
             process.arguments = ["transcribe", input.path] + arguments
             var environment = ProcessInfo.processInfo.environment
             environment["CONURE_MODELS_DIR"] = directory.appendingPathComponent("models").path
+            environment["CONURE_LIBRARY_DIR"] = directory.appendingPathComponent("library").path
             process.environment = environment
             let stdout = Pipe()
             let stderr = Pipe()

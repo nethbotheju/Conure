@@ -21,7 +21,8 @@ Media (16 kHz mono) lives outside the repository and is never committed:
   the run as synthetic — it proves stability, not real-world quality.
 
 Time long runs with `/usr/bin/time -l -o run.time …`. Delete the media after
-the run.
+the run. Point `CONURE_LIBRARY_DIR` at a temporary folder while testing records so
+release runs do not pollute the real library.
 
 ## Checks
 
@@ -32,14 +33,17 @@ the run.
 | C3 | Unified EN | `--model parakeet-unified-en` | Capitalization and punctuation reviewed |
 | C4 | Multilingual + hint | `--model parakeet-v3-multilingual --language fr` | Correct French incl. accents |
 | C5 | Japanese auto-detect | `--model parakeet-v3-multilingual` (no hint) | Japanese script, not romaji |
-| C6 | Speakers 2/3/4 | `--speakers` with 2, 3, 4 names | One stable label per voice; no drift, no phantoms |
+| C6 | Speakers 2/3/4 | `--diarize`, then `--speaker-count` 1/2/3/4 | One stable label per voice; no drift; a count below the detected clusters merges weak voices and reports it in the done/progress detail; strong extras are kept |
 | C7 | Long file, every engine | each model on the ~2 h file, `--speakers --timed` | Completes; < 4 GB peak RSS; record wall time + RSS |
 | C8 | Cancel (SIGTERM) | `kill -TERM` mid-run | Exit 130; no partial or modified output |
 | C9 | Cancel (SIGINT) | `kill -INT` mid-run | Exit 130; no output file |
-| C10 | Collision policy | run twice without `--replace`/`--unique` | Second run refused, existing file untouched |
+| C10 | Collision policy | run twice without `--replace`/`--unique`; export twice to the same path | Second run refused, existing file untouched; exports overwrite only the destination file, never the record |
 | C11 | Model manager | `models list` / `download` / `remove` | States, sizes, engine tags correct; required models non-removable |
-| C12 | GUI smoke | `swift run ConureApp` | Queue, cancel, model picker, reveal output |
+| C12 | GUI smoke | `swift run ConureApp` | Single window: Upload (⌘N), Queue (⌘1), Library (⌘2), Settings (⌘,); drop-anywhere and Finder **Open With** land in Upload; a finished job's **Open** switches to Library and selects the record |
 | C13 | Media import | follow [`media-import.md`](media-import.md) on the packaged app | Drag-and-drop and Finder **Open With** reach the job configuration sheet |
+| C14 | Record round trip | `transcribe short.wav --diarize --save --no-export`, inspect `~/Library/Application Support/Conure/library/`, `speakers <record> --json`, `speakers <record> --set 1=Alice`, `export <record> --format md --timed` | Schema v1 record with metadata/speakers/lines; no audio copied; rename persists and export shows the new name; record unchanged by export |
+| C15 | Library CLI errors | `speakers <record> --set 9=X`, `--set 1=`, edit `schemaVersion` to 9, corrupt a JSON file, then `conure speakers`/`export` | Clear errors, no partial writes, library still lists readable records; newer schema refused |
+| C16 | App Library flow | packaged app: Upload → add → transcribe → open → rename → export → delete | Record listed newest first with speaker names; rename updates every line and survives relaunch; blank/newline/overlong names rejected; export Save panel defaults to the source folder and title; delete asks for confirmation and moves only the record to the Trash; a moved source still opens and exports; `Conure Dev` uses `Conure Dev/library`; `CONURE_LIBRARY_DIR` overrides both |
 
 ## Run records
 

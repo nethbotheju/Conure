@@ -19,9 +19,10 @@ NVIDIA's Parakeet ASR running entirely on-device (CoreML / Neural Engine), with 
 - **Fully local:** audio never leaves your Mac, and everything works offline after the first model download.
 - **Fast:** the default speech-swift model transcribes at ~45–95× real-time on Apple Silicon; other model speeds vary.
 - **Lean:** the default model used ~1.7 GB peak memory in a 2-hour test; FluidAudio long-file memory is still being validated.
-- **Speaker-aware:** name up to 4 attendees and every line comes out labeled with the right speaker.
+- **Speaker-aware:** detect up to 4 voices, then name them in the Library at any time — names apply to every line, no re-run needed.
+- **Library:** every transcript is saved as a versioned JSON record you can reopen, rename speakers in, and re-export as Markdown or SRT months later.
 - **App + CLI:** choose a model per job in the queue app or script the CLI with JSON output; both share the same pipeline.
-- **Native import:** drag files onto the queue window or send them to Conure from Finder's **Open With**; either way the job configuration sheet opens first.
+- **Native import:** drop files anywhere in the app window or send them to Conure from Finder's **Open With**; both land in the **Upload** pane, ready to queue.
 - **Formats:** clean Markdown with optional timestamps, or ready-to-use SRT subtitles with speaker prefixes.
 
 ## Install
@@ -38,15 +39,15 @@ Conure is open-source (MIT licensed). Both stable Conure and Conure Dev are **ad
 
 ### Check for updates
 
-Choose **Conure → Check for Updates…**. The update window shows **You’re up to date** when appropriate, or the newer stable version and release notes. Choose **Download Update**, wait for signature verification and preparation, then choose **Quit & Install**. Conure quits, Sparkle replaces the app, and Conure reopens. Finish or cancel queued/running transcriptions and model operations first: the queue is not saved across restarts. Models and transcripts are not replaced. Cancelling or closing the update window cancels the update rather than scheduling installation on a later quit.
+Choose **Conure → Check for Updates…** or **Settings → Updates** (⌘,) and press **Check for Updates**. The page shows **You’re up to date** when appropriate, or the newer stable version and release notes. Choose **Download Update**, wait for signature verification and preparation, then choose **Quit & Install**. Conure quits, Sparkle replaces the app, and Conure reopens. Finish or cancel queued/running transcriptions and model operations first: the queue is not saved across restarts. Models and transcripts are not replaced. Cancelling the update from Settings cancels it rather than scheduling installation on a later quit.
 
 Updates use [Sparkle](https://sparkle-project.org), pinned in SwiftPM. Both the feed and update archive must be signed with the publisher’s Ed25519 update key. Verification is required **before extraction**, even though the app itself is ad-hoc signed. No paid Apple Developer membership is required for this update-signing mechanism; it does not make the app notarized or Apple-approved. A build without the publisher’s public key clearly disables in-app updates instead of accepting an unsigned replacement.
 
-Checks happen only when requested, never automatically at launch or on a schedule. Sparkle fetches `https://github.com/nethbotheju/Conure/releases/latest/download/appcast.xml`; GitHub redirects this to the latest published non-prerelease release asset and may use its asset CDN. Downloads require an explicit button press and start at the matching official repository’s versioned DMG asset. The feed is cryptographically verified, including the embedded plain-text release summary; external release-note downloads are disabled. No app-provided authentication or system profiling is used. GitHub/CDN servers receive normal network metadata (including IP address and Sparkle’s app/version User-Agent). No recordings, transcripts, file paths, or model inventory are sent. Sparkle stores downloaded update data in its local cache until installation or cleanup. Browser links use your browser’s normal GitHub session/privacy settings.
+Checks happen only when requested, never automatically at launch or on a schedule. In packaged stable builds, Sparkle fetches `https://github.com/nethbotheju/Conure/releases/latest/download/appcast.xml`; GitHub redirects this to the latest published non-prerelease release asset and may use its asset CDN. Downloads require an explicit button press and start at the matching official repository’s versioned DMG asset. The feed is cryptographically verified, including the embedded plain-text release summary; external release-note downloads are disabled. No app-provided authentication or system profiling is used. GitHub/CDN servers receive normal network metadata (including IP address and Sparkle’s app/version User-Agent). No recordings, transcripts, file paths, or model inventory are sent. Sparkle stores downloaded update data in its local cache until installation or cleanup. Browser links use your browser’s normal GitHub session/privacy settings.
 
 Only signed, newer stable semantic versions with the expected official Conure DMG URL are accepted; draft releases are inaccessible and prereleases are excluded from the stable feed. Downgrades, other repositories, package installers, and unsigned feeds/archives are refused. Network errors, malformed feeds, signature failures, disk/permission failures, and incompatible system versions produce messages rather than claiming the app is current. Sparkle handles extraction, privileged installation when necessary, replacement, and relaunch; no shell-based self-replacement is used. If running from a DMG or an app-translocated/read-only location, move Conure to Applications first. Transcription remains usable offline.
 
-**Conure Dev**, prerelease, and unpackaged builds make no stable update requests and never replace stable Conure. Dev snapshots remain manual GitHub Actions artifact installs. Older releases without an updater require one manual installation of an updater-enabled release. Publisher signing-key setup and release/upgrade testing are documented in [validation/updates.md](validation/updates.md); the go/no-go evaluation, threat model, key lifecycle, and rollback behaviour are recorded in [validation/updates-evaluation.md](validation/updates-evaluation.md).
+**Conure Dev**, prerelease, and unpackaged builds never start Sparkle and never replace stable Conure. Their **Check for Updates** button instead asks the public GitHub Releases API for the latest stable tag and offers the release link for a manual install; this sends only a normal HTTPS request, with the same no-transcript/no-path guarantees. Dev snapshots remain manual GitHub Actions artifact installs. Older releases without an updater require one manual installation of an updater-enabled release. Publisher signing-key setup and release/upgrade testing are documented in [validation/updates.md](validation/updates.md); the go/no-go evaluation, threat model, key lifecycle, and rollback behaviour are recorded in [validation/updates-evaluation.md](validation/updates-evaluation.md).
 
 ### Development builds (Conure Dev)
 
@@ -109,7 +110,7 @@ If macOS reports that the app **will damage your computer**, or that it is **dam
 
 ## Quick start
 
-**App** — launch Conure, hit **＋** or drop audio/video files onto the window (Finder's **Open With → Conure** works too), optionally name up to 4 speakers, and watch the queue run.
+**App** — launch Conure and use the **Upload** pane (⌘N) to drop audio/video files, pick a model, and optionally choose a speaker count; Finder's **Open With → Conure** lands there too. Jobs run in the **Queue** (⌘1), grouped into In Progress, Needs Attention, and Completed; opening a finished job jumps to its Library record and clears the row, and **Clear** removes the rest. Finished work lives in the **Library** (⌘2), where you can read the transcript, rename speakers with the pencil button, and export Markdown or SRT. Models, storage, updates, and diagnostics live in **Settings** (⌘,).
 
 **CLI** — install the bundled engine on your PATH from Settings, or use it straight from a build:
 
@@ -117,14 +118,25 @@ If macOS reports that the app **will damage your computer**, or that it is **dam
 # Plain transcript (Markdown, no timestamps) next to the input file
 conure transcribe meeting.mp4
 
-# Speaker-labeled Markdown with timestamps and attendee names
+# Speaker labels with an inferred count, then name them later
+conure transcribe meeting.mp4 --diarize --save
+conure speakers <record.json> --set 1=Alice --set 2=Bob
+
+# Ask for exactly two speakers: weak extra clusters merge into the nearest voice
+conure transcribe meeting.mp4 --speaker-count 2 --save --no-export
+
+# Legacy shortcut: names are assigned by first-speech order
 conure transcribe meeting.mp4 --speakers "Alice,Bob" --timed
 
 # SRT subtitles with speaker prefixes
-conure transcribe recording.m4a --speakers "Alice,Bob" --format srt
+conure transcribe recording.m4a --diarize --format srt
+
+# Re-render a saved record at any time (names are current)
+conure export <record.json> --format md --timed
+conure export <record.json> --format srt --output ~/Desktop/meeting.srt
 
 # Multiple files (processed sequentially), custom output folder
-conure transcribe *.mp4 --speakers "Alice,Bob,Carol" --output ~/transcripts
+conure transcribe *.mp4 --diarize --output ~/transcripts
 
 # Existing transcripts are never silently overwritten — pick a policy:
 conure transcribe meeting.mp4 --replace   # overwrite existing output
@@ -142,7 +154,12 @@ conure transcribe french.wav --model parakeet-v3-multilingual --language fr
 |---|---|---|
 | `--model` | `parakeet` | Model id or HuggingFace repo |
 | `--language` | auto | Optional script hint for multilingual v3 (e.g. `fr`); Japanese auto-detects without a hint |
-| `--speakers` | — | Comma-separated attendee names (max 4); enables diarization |
+| `--diarize` | off | Label speakers with an inferred count; name them later with `conure speakers` |
+| `--speaker-count N` | — | Keep 1–4 speakers; weak extra clusters merge into the nearest voice and their lines are preserved |
+| `--speakers` | — | Legacy: comma-separated names (max 4) assigned by first-speech order; enables diarization |
+| `--save` | off | Save the transcript record to the library |
+| `--record <path>` | — | Write the transcript record to a specific path |
+| `--no-export` | off | Skip Markdown/SRT output (needs `--save` or `--record`) |
 | `--format` | `md` | `md` or `srt` |
 | `--timed / --no-timed` | no | Timestamps in Markdown output (`[H:MM:SS]` per line) |
 | `--output` | input folder | Output directory |
@@ -150,9 +167,28 @@ conure transcribe french.wav --model parakeet-v3-multilingual --language fr
 | `--unique` | off | Write to a numbered filename (`name 2.md`) when the output already exists |
 | `--pretty` | JSON lines | Human-readable progress |
 
-### Output collisions
+The `done` event reports both paths: `outputPath` (the rendered file, absent with `--no-export`) and `recordPath` (the JSON record).
 
-Re-running a transcription never silently overwrites an existing file: by default the CLI stops with an error if the output path is already taken, including when two inputs in the same invocation share a basename and output folder. Pass `--replace` to overwrite or `--unique` to write a numbered copy (`meeting 2.md`) that keeps the correct extension. The queue app performs the same check when jobs are added and asks whether to replace, keep both, or cancel. Output files are always written atomically after the destination is resolved.
+## Transcript library
+
+A successful transcription can be saved as a versioned JSON record (schema v1) containing metadata, speakers (id, optional name, talk time, segment count), and every timestamped line. Markdown and SRT are renderings of that record, so a rename never requires re-running ASR and an old transcript can always be re-exported.
+
+Records live in `~/Library/Application Support/Conure/library/` — one JSON per transcript, written atomically. **No audio is copied.** `Conure Dev` uses its own `Conure Dev/library/` folder, and `CONURE_LIBRARY_DIR` overrides the location (useful for tests).
+
+```bash
+conure speakers <record.json>                    # list speakers and talk time
+conure speakers <record.json> --json             # machine-readable
+conure speakers <record.json> --set 1="Alice"    # rename (applies to every line)
+conure speakers <record.json> --clear 1          # remove a name
+conure export <record.json> --format md --timed  # re-render Markdown
+conure export <record.json> --format srt --output -   # SRT to stdout
+```
+
+Records with a newer schema version are refused with a clear error rather than being rewritten. Exported files are snapshots: later renames do not modify files you already exported. The Library lists records newest first; deleting a record moves only the JSON to the Trash, leaving the source audio and any exported files in place.
+
+## Output collisions
+
+Re-running a transcription never silently overwrites an existing file: by default the CLI stops with an error if the output path is already taken, including when two inputs in the same invocation share a basename and output folder. Pass `--replace` to overwrite or `--unique` to write a numbered copy (`meeting 2.md`) that keeps the correct extension. The queue app never writes exported files during a job — it saves the record to the library and leaves export to an explicit Save panel — so collisions only apply to CLI runs and exports. Output files are always written atomically after the destination is resolved.
 
 ## Models
 
@@ -171,7 +207,7 @@ Models live in `~/Library/Application Support/Conure/models/` (override with `CO
 | `parakeet` | ASR — Parakeet TDT 0.6B v2 English, CoreML INT8, Neural Engine (default) | ~611 MB | Yes |
 | `parakeet-unified-en` | FluidAudio Unified EN, punctuated and capitalized | ~590 MB | Yes |
 | `parakeet-v3-multilingual` | FluidAudio Parakeet TDT v3, 25 European languages + Japanese | ~465 MB | Yes |
-| `sortformer` | Speaker diarization (≤4 speakers), used with `--speakers` | ~239 MB | No (required) |
+| `sortformer` | Speaker diarization (≤4 speakers), used with `--diarize`, `--speaker-count`, or `--speakers` | ~239 MB | No (required) |
 | `silero` | Voice activity detection, used otherwise | ~1 MB | No (required) |
 
 The original `parakeet` remains the default. FluidAudio provides the other two ASR models; Sortformer and Silero remain on speech-swift for every model.
@@ -179,9 +215,10 @@ The original `parakeet` remains the default. FluidAudio provides the other two A
 ## How it works
 
 1. **Decode** — AVFoundation extracts mono 16 kHz PCM (mp4, mov, m4a, mp3, wav, aac, aiff)
-2. **Segment** — with `--speakers`: Sortformer diarization produces speaker turns; otherwise Silero VAD finds utterances. Same-speaker turns merge into ≤25 s chunks
+2. **Segment** — with speaker labels: Sortformer diarization produces speaker turns; otherwise Silero VAD finds utterances. Same-speaker turns merge into ≤25 s chunks
 3. **Transcribe** — each chunk through the selected ASR engine; chunk bounds become line timestamps, so a line can never blend two speakers
-4. **Write** — Markdown or SRT next to the input (or `--output` dir)
+4. **Attribute** — diarization clusters are decoupled from names: low-evidence clusters merge into the nearest speaker when a count is supplied, speakers are ordered by talk time, and names stay editable afterwards
+5. **Write** — the JSON record plus Markdown/SRT rendered from it (next to the input, or the `--output` dir), all written atomically
 
 The GUI drives the exact CLI as a subprocess (JSON progress on stdout) — one engine everywhere. Internals and repo layout are documented in [AGENTS.md](AGENTS.md).
 

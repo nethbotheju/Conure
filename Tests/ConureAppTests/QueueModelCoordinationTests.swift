@@ -16,7 +16,7 @@ final class QueueModelCoordinationTests: XCTestCase {
             name: "fast-cli.sh",
             contents: """
             #!/bin/sh
-            echo '{"type":"done","outputPath":"/tmp/out.md"}'
+            echo '{"type":"done","recordPath":"/tmp/out.md"}'
             """
         )
         slowCLI = try Self.writeScript(
@@ -29,7 +29,7 @@ final class QueueModelCoordinationTests: XCTestCase {
               echo '{"type":"progress","stage":"asr","percent":10}'
               while :; do sleep 0.05; done
             fi
-            echo '{"type":"done","outputPath":"/tmp/next.md"}'
+            echo '{"type":"done","recordPath":"/tmp/next.md"}'
             """
         )
     }
@@ -49,10 +49,7 @@ final class QueueModelCoordinationTests: XCTestCase {
         JobConfiguration(
             model: model,
             language: nil,
-            speakers: [],
-            format: "md",
-            timed: false,
-            outputDirectory: nil
+            speakerCount: nil
         )
     }
 
@@ -69,7 +66,7 @@ final class QueueModelCoordinationTests: XCTestCase {
         XCTAssertFalse(store.isRunning)
 
         executor.finish("silero")
-        let finished = await waitUntil { store.jobs.first?.status == .done(output: "/tmp/out.md") }
+        let finished = await waitUntil { store.jobs.first?.status == .done(record: "/tmp/out.md") }
         XCTAssertTrue(finished, "\(store.jobs.map { ($0.input.lastPathComponent, $0.status) })")
     }
 
@@ -88,7 +85,7 @@ final class QueueModelCoordinationTests: XCTestCase {
         XCTAssertEqual(store.jobs.first?.status, .queued)
 
         executor.finish("parakeet-unified-en")
-        let finished = await waitUntil { store.jobs.first?.status == .done(output: "/tmp/out.md") }
+        let finished = await waitUntil { store.jobs.first?.status == .done(record: "/tmp/out.md") }
         XCTAssertTrue(finished)
     }
 
@@ -100,7 +97,7 @@ final class QueueModelCoordinationTests: XCTestCase {
         let store = QueueStore(executableURL: fastCLI, coordinator: coordinator)
         store.add(inputs: [directory.appendingPathComponent("meeting.mp4")], configuration: configuration())
 
-        let finished = await waitUntil { store.jobs.first?.status == .done(output: "/tmp/out.md") }
+        let finished = await waitUntil { store.jobs.first?.status == .done(record: "/tmp/out.md") }
         XCTAssertTrue(finished)
     }
 

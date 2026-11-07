@@ -4,28 +4,39 @@ import AppKit
 struct SettingsView: View {
     @EnvironmentObject private var store: QueueStore
     @EnvironmentObject private var modelCoordinator: ModelCoordinator
-    @State private var models: [CLIModelRow] = []
+    @EnvironmentObject private var updates: UpdateStore
+    @EnvironmentObject private var navigation: AppNavigation
+    @EnvironmentObject private var inventory: ModelInventory
     @State private var installMessage: String?
     @State private var pendingRemoval: CLIModelRow?
     @State private var pendingRemovalJobIDs: [UUID] = []
     @State private var mutatingModelIDs: Set<String> = []
 
+    private var models: [CLIModelRow] { inventory.rows }
     private var asrModels: [CLIModelRow] { models.filter { !$0.required } }
     private var requiredModels: [CLIModelRow] { models.filter { $0.required } }
 
     var body: some View {
-        TabView {
-            modelsTab
-                .tabItem { Label("Models", systemImage: "shippingbox") }
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
-            licensesTab
-                .tabItem { Label("Credits", systemImage: "text.book.closed") }
-            DiagnosticsView()
-                .tabItem { Label("About", systemImage: "info.circle") }
+        VStack(spacing: 0) {
+            Picker("Settings section", selection: $navigation.settingsTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
-        .onAppear(perform: reload)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .navigationTitle("Settings")
+        .onAppear { inventory.loadIfNeeded() }
         .onReceive(modelCoordinator.$operations) { operations in
             let current = Set(operations.compactMap { id, operation -> String? in
                 if case .failed = operation { return nil }
@@ -33,7 +44,7 @@ struct SettingsView: View {
             })
             let finished = mutatingModelIDs.subtracting(current)
             mutatingModelIDs = current
-            if !finished.isEmpty { reload() }
+            if !finished.isEmpty { inventory.reload() }
         }
         .alert("Model operation failed", isPresented: Binding(
             get: { modelCoordinator.lastErrorMessage != nil },
@@ -43,6 +54,30 @@ struct SettingsView: View {
         } message: {
             Text(modelCoordinator.lastErrorMessage ?? "")
         }
+    }
+
+    private var content: some View {
+        ZStack {
+            tabContent(.models) { modelsTab }
+            tabContent(.general) { generalTab }
+            tabContent(.updates) {
+                UpdatesView()
+                    .environmentObject(updates)
+            }
+            tabContent(.about) { DiagnosticsView() }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func tabContent<Content: View>(
+        _ tab: SettingsTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .opacity(navigation.settingsTab == tab ? 1 : 0)
+            .allowsHitTesting(navigation.settingsTab == tab)
+            .accessibilityHidden(navigation.settingsTab != tab)
     }
 
     private var modelsTab: some View {
@@ -64,6 +99,8 @@ struct SettingsView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay {
             if models.isEmpty {
                 ProgressView("Loading…")
@@ -235,38 +272,39 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("Models Folder") {
-                Text("Models are stored in \(CLI.shared.modelsURL.path) (FluidAudio weights in the FluidAudio subfolder).")
-                    .font(.callout)
-                    .textSelection(.enabled)
+
+            Section("Storage") {
+                LabeledContent("Models") {
+                    Text(CLI.shared.modelsURL.path)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Library") {
+                    Text(CLI.shared.libraryURL.path)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Button("Show Models in Finder") {
+                        reveal(CLI.shared.modelsURL)
+                    }
+                    Button("Show Library in Finder") {
+                        reveal(CLI.shared.libraryURL)
+                    }
+                }
+                Text("Transcript records live in the library; audio is never copied. Set CONURE_MODELS_DIR or CONURE_LIBRARY_DIR to override either location.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var licensesTab: some View {
-        Form {
-            Section("Software updates") {
-                Link("Sparkle — MIT and third-party notices", destination: URL(string: "https://github.com/sparkle-project/Sparkle/blob/2.10.0/LICENSE")!)
-            }
-            Section("Inference engines") {
-                Link("FluidAudio — Apache-2.0", destination: URL(string: "https://github.com/FluidInference/FluidAudio/blob/v0.17.4/LICENSE")!)
-                Link("speech-swift — Apache-2.0 (vendored)", destination: URL(string: "https://github.com/soniqo/speech-swift/blob/main/LICENSE")!)
-            }
-            Section("Model credits") {
-                Text("Parakeet models © NVIDIA. See each model’s Hugging Face page for its license and attribution; Unified EN is CC-BY-4.0.")
-                Text("Sortformer © NVIDIA. Silero VAD — MIT.")
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private func reload() {
-        CLI.shared.models { rows in
-            Task { @MainActor in
-                models = rows
-            }
-        }
+    private func reveal(_ url: URL) {
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private func installCLI() {

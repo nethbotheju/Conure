@@ -12,6 +12,18 @@ struct CLIEvent: Codable, Sendable {
     let percent: Double?
     let detail: String?
     let outputPath: String?
+    let recordPath: String?
+}
+
+struct CLIError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+protocol LibraryCLI: Sendable {
+    func setSpeakerName(record: URL, id: Int, name: String) async throws
+    func clearSpeakerName(record: URL, id: Int) async throws
+    func exportRecord(record: URL, format: String, timed: Bool, output: URL) async throws
 }
 
 struct CLIModelRow: Codable, Identifiable, Sendable {
@@ -63,12 +75,22 @@ final class CLI: @unchecked Sendable {
         return support.appendingPathComponent("Conure/models", isDirectory: true)
     }
 
-    func configure(_ process: Process) {
-        if isDevApp {
-            var environment = ProcessInfo.processInfo.environment
-            environment["CONURE_MODELS_DIR"] = modelsURL.path
-            process.environment = environment
+    var libraryURL: URL {
+        if let override = ProcessInfo.processInfo.environment["CONURE_LIBRARY_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
         }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let folder = isDevApp ? "Conure Dev/library" : "Conure/library"
+        return support.appendingPathComponent(folder, isDirectory: true)
+    }
+
+    func configure(_ process: Process) {
+        var environment = ProcessInfo.processInfo.environment
+        if isDevApp {
+            environment["CONURE_MODELS_DIR"] = modelsURL.path
+        }
+        environment["CONURE_LIBRARY_DIR"] = libraryURL.path
+        process.environment = environment
     }
 
     var bundledURL: URL {
@@ -215,13 +237,14 @@ final class CLI: @unchecked Sendable {
                     onEvent(CLIEvent(
                         type: .error, stage: nil, percent: nil,
                         detail: "Model command failed (exit \(process.terminationStatus)); run the command in Terminal for details.",
-                        outputPath: nil
+                        outputPath: nil,
+                        recordPath: nil
                     ))
                 }
             } catch {
                 onEvent(CLIEvent(
                     type: .error, stage: nil, percent: nil,
-                    detail: error.localizedDescription, outputPath: nil
+                    detail: error.localizedDescription, outputPath: nil, recordPath: nil
                 ))
             }
             onEnd()
@@ -232,34 +255,79 @@ final class CLI: @unchecked Sendable {
         input: URL,
         model: String?,
         language: String?,
-        speakers: [String]?,
-        format: String,
-        timed: Bool,
-        output: URL?,
-        collision: CollisionPolicy? = nil
+        speakerCount: Int?
     ) -> [String] {
-        var args = ["transcribe", input.path]
+        var args = ["transcribe", input.path, "--save", "--no-export"]
         if let model, !model.isEmpty {
             args += ["--model", model]
         }
         if let language, !language.isEmpty {
             args += ["--language", language]
         }
-        if let speakers, !speakers.isEmpty {
-            args += ["--speakers", speakers.joined(separator: ",")]
-        }
-        args += ["--format", format]
-        if timed {
-            args += ["--timed"]
-        }
-        if let output {
-            args += ["--output", output.path]
-        }
-        switch collision {
-        case .replace: args += ["--replace"]
-        case .unique: args += ["--unique"]
-        case nil: break
+        if let speakerCount {
+            args += ["--speaker-count", String(speakerCount)]
         }
         return args
+    }
+
+    private func capture(
+        _ arguments: [String],
+        completion: @escaping @Sendable (Result<String, CLIError>) -> Void
+    ) {
+        queue.async { [self] in
+            let process = Process()
+            process.executableURL = url
+            process.arguments = arguments
+            configure(process)
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                let output = (process.standardOutput as? Pipe)?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+                let errors = (process.standardError as? Pipe)?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else {
+                    let message = String(decoding: errors, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    completion(.failure(CLIError(
+                        message: message.isEmpty
+                            ? "conure exited with code \(process.terminationStatus)"
+                            : message
+                    )))
+                    return
+                }
+                completion(.success(String(decoding: output, as: UTF8.self)))
+            } catch {
+                completion(.failure(CLIError(
+                    message: "Could not start CLI at \(url.path): \(error.localizedDescription)"
+                )))
+            }
+        }
+    }
+
+    private func captureAsync(_ arguments: [String]) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            capture(arguments) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+}
+
+extension CLI: LibraryCLI {
+    func setSpeakerName(record: URL, id: Int, name: String) async throws {
+        _ = try await captureAsync(["speakers", record.path, "--set", "\(id)=\(name)", "--json"])
+    }
+
+    func clearSpeakerName(record: URL, id: Int) async throws {
+        _ = try await captureAsync(["speakers", record.path, "--clear", String(id), "--json"])
+    }
+
+    func exportRecord(record: URL, format: String, timed: Bool, output: URL) async throws {
+        var arguments = ["export", record.path, "--format", format, "--output", output.path]
+        if timed {
+            arguments.append("--timed")
+        }
+        _ = try await captureAsync(arguments)
     }
 }

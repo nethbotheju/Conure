@@ -21,21 +21,22 @@ public struct ConureEvent: Sendable, Codable {
     public let percent: Double?
     public let detail: String?
     public let outputPath: String?
+    public let recordPath: String?
 
     public static func progress(_ stage: Stage, _ percent: Double, _ detail: String? = nil) -> ConureEvent {
-        ConureEvent(type: .progress, stage: stage, percent: percent, detail: detail, outputPath: nil)
+        ConureEvent(type: .progress, stage: stage, percent: percent, detail: detail, outputPath: nil, recordPath: nil)
     }
 
     public static func download(_ percent: Double, _ detail: String? = nil) -> ConureEvent {
-        ConureEvent(type: .progress, stage: .modelDownload, percent: percent, detail: detail, outputPath: nil)
+        ConureEvent(type: .progress, stage: .modelDownload, percent: percent, detail: detail, outputPath: nil, recordPath: nil)
     }
 
-    public static func done(_ outputPath: String) -> ConureEvent {
-        ConureEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: outputPath)
+    public static func done(_ outputPath: String?, recordPath: String? = nil) -> ConureEvent {
+        ConureEvent(type: .done, stage: nil, percent: nil, detail: nil, outputPath: outputPath, recordPath: recordPath)
     }
 
     public static func error(_ message: String) -> ConureEvent {
-        ConureEvent(type: .error, stage: nil, percent: nil, detail: message, outputPath: nil)
+        ConureEvent(type: .error, stage: nil, percent: nil, detail: message, outputPath: nil, recordPath: nil)
     }
 }
 
