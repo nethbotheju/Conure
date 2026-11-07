@@ -4,8 +4,8 @@ import XCTest
 
 @MainActor
 final class AppNavigationTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private var suiteName: String!
+    nonisolated(unsafe) private var defaults: UserDefaults!
+    nonisolated(unsafe) private var suiteName: String!
 
     override func setUpWithError() throws {
         suiteName = "conure-navigation-tests-\(UUID().uuidString)"
