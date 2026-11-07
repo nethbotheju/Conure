@@ -42,7 +42,8 @@ if [ "${1:-}" = --install ]; then
   swiftc -swift-version 6 -parse-as-library \
     -F "$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64" -framework Sparkle \
     -Xlinker -rpath -Xlinker '@executable_path/../Frameworks' \
-    "$ROOT/App/Sources/ConureApp/UpdatePolicy.swift" "$ROOT/App/Sources/ConureApp/UpdateStore.swift" \
+    "$ROOT/App/Sources/ConureApp/UpdatePolicy.swift" "$ROOT/App/Sources/ConureApp/ManualUpdateChecker.swift" \
+    "$ROOT/App/Sources/ConureApp/UpdateStore.swift" \
     "$ROOT/App/Sources/ConureApp/ApplicationDelegate.swift" \
     "$ROOT/App/Sources/ConureApp/ExternalOpenInbox.swift" \
     "$ROOT/Tests/UpdateHarness/UpdateHarness.swift" -o "$APP/Contents/MacOS/ConureApp"
