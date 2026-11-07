@@ -2,198 +2,146 @@ import SwiftUI
 
 struct JobsView: View {
     @EnvironmentObject private var store: QueueStore
-    @EnvironmentObject private var setup: SetupStore
-    @EnvironmentObject private var inbox: ExternalOpenInbox
-    @State private var showingAddSheet = false
-    @State private var sheetInputs: [URL] = []
-    @State private var sheetNotice: String?
-    @State private var isDropTargeted = false
-    @State private var showingRejectionAlert = false
-    @State private var rejectionMessage = ""
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var navigation: AppNavigation
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if store.jobs.isEmpty {
-                    emptyState
-                } else {
-                    jobList
+        Group {
+            if store.jobs.isEmpty {
+                emptyState
+            } else {
+                jobList
+            }
+        }
+        .navigationTitle("Queue")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    navigation.go(to: .upload)
+                } label: {
+                    Label("Add Files", systemImage: "plus")
                 }
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                importMedia(urls)
-            } isTargeted: { targeted in
-                isDropTargeted = targeted
-            }
-            .overlay {
-                if isDropTargeted {
-                    dropTarget
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if setup.isActive {
-                    setupBanner
-                }
-            }
-            .navigationTitle("Queue")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        sheetInputs = []
-                        sheetNotice = nil
-                        showingAddSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .help("Add files to the queue")
-                }
-            }
-            .sheet(isPresented: $showingAddSheet, onDismiss: {
-                sheetInputs = []
-                sheetNotice = nil
-                presentPendingImport()
-            }) {
-                AddJobSheet(
-                    inputs: sheetInputs,
-                    notice: sheetNotice,
-                    onAdd: { inputs, configuration in
-                        store.add(inputs: inputs, configuration: configuration)
-                    },
-                    conflictsFor: { inputs, configuration in
-                        store.outputConflicts(inputs: inputs, configuration: configuration)
-                    }
-                )
-            }
-            .alert("No supported files", isPresented: $showingRejectionAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(rejectionMessage)
-            }
-            .onAppear {
-                presentPendingImport()
-            }
-            .onReceive(inbox.$pending) { pending in
-                guard !pending.isEmpty else { return }
-                Task { @MainActor in presentPendingImport() }
+                .help("Add audio or video files")
             }
         }
-    }
-
-    private func presentPendingImport() {
-        guard !showingAddSheet else { return }
-        importMedia(inbox.consume())
-    }
-
-    @discardableResult
-    private func importMedia(_ urls: [URL]) -> Bool {
-        let request = MediaImport.request(for: urls)
-        guard !request.accepted.isEmpty else {
-            guard !request.rejected.isEmpty else { return false }
-            rejectionMessage = "Nothing was added. " + MediaImport.rejectionSummary(for: request.rejected)
-            showingRejectionAlert = true
-            return false
-        }
-        sheetInputs = request.accepted
-        sheetNotice = request.rejected.isEmpty
-            ? nil
-            : MediaImport.rejectionSummary(for: request.rejected)
-        showingAddSheet = true
-        return true
-    }
-
-    private var dropTarget: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "arrow.down.doc")
-                .font(.system(size: 30))
-            Text("Drop to add audio or video files")
-                .font(.callout.weight(.medium))
-        }
-        .foregroundStyle(.tint)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.background.opacity(0.9)))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.tint, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
-        }
-        .padding(12)
-        .allowsHitTesting(false)
-    }
-
-    private var setupBanner: some View {
-        HStack(spacing: 10) {
-            switch setup.phase {
-            case .downloading(let name, let percent):
-                ProgressView(value: percent / 100)
-                    .frame(width: 140)
-                Text("Downloading required model — \(name) \(Int(percent))%")
-                    .font(.callout)
-                    .monospacedDigit()
-            case .failed(let reason):
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text(reason)
-                    .font(.callout)
-                Button("Retry") { setup.retry() }
-                    .controlSize(.small)
-            default:
-                EmptyView()
-            }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
-        .background(.bar)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bird")
-                .font(.system(size: 44))
-                .foregroundStyle(.secondary)
-            Text("No transcriptions yet")
-                .font(.title2)
-            Text("Drop audio or video files here, or click + to browse.")
-                .foregroundStyle(.secondary)
+        ContentUnavailableView {
+            Label("No Transcriptions Yet", systemImage: "waveform")
+        } description: {
+            Text("Upload audio or video files to start a transcription. Finished work is saved to the Library.")
+        } actions: {
+            Button("Upload Files") {
+                navigation.go(to: .upload)
+            }
+            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var jobList: some View {
         List {
-            ForEach(store.jobs) { job in
-                JobRow(job: job)
-                    .contextMenu {
-                        if case .done(let output) = job.status {
-                            Button("Reveal Output") {
-                                NSWorkspace.shared.selectFile(
-                                    output,
-                                    inFileViewerRootedAtPath:
-                                        URL(fileURLWithPath: output).deletingLastPathComponent().path
-                                )
-                            }
-                        }
-                        if job.status == .queued {
-                            Button("Cancel") { store.cancel(job.id) }
-                        }
-                        if case .running = job.status {
-                            Button("Cancel") { store.cancel(job.id) }
-                        }
-                        if case .failed = job.status {
-                            Button("Retry") { store.retry(job.id) }
-                        }
-                        if job.status == .cancelled {
-                            Button("Retry") { store.retry(job.id) }
-                        }
-                        Button("Remove", role: .destructive) { store.remove(job.id) }
+            if !activeJobs.isEmpty {
+                Section("In Progress") {
+                    ForEach(activeJobs) { job in
+                        row(for: job)
                     }
+                }
+            }
+            if !issueJobs.isEmpty {
+                Section("Needs Attention") {
+                    ForEach(issueJobs) { job in
+                        row(for: job)
+                    }
+                }
+            }
+            if !completedJobs.isEmpty {
+                Section {
+                    ForEach(completedJobs) { job in
+                        row(for: job)
+                    }
+                } header: {
+                    HStack {
+                        Text("Completed")
+                        Spacer()
+                        Button("Clear") {
+                            store.clearCompleted()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .help("Remove completed jobs from the queue; transcripts stay in the Library")
+                    }
+                }
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var activeJobs: [Job] {
+        store.jobs.filter { job in
+            switch job.status {
+            case .queued, .running: return true
+            default: return false
+            }
+        }
+    }
+
+    private var issueJobs: [Job] {
+        store.jobs.filter { job in
+            switch job.status {
+            case .failed, .cancelled: return true
+            default: return false
+            }
+        }
+    }
+
+    private var completedJobs: [Job] {
+        store.jobs.filter { job in
+            if case .done = job.status { return true }
+            return false
+        }
+    }
+
+    private func row(for job: Job) -> some View {
+        JobRow(job: job) { record in
+            openRecord(jobID: job.id, record: record)
+        }
+        .contextMenu {
+            if case .done(let record) = job.status, let record {
+                Button("Open Transcript") { openRecord(jobID: job.id, record: record) }
+                Button("Reveal Record in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: record)])
+                }
+            }
+            if job.status == .queued {
+                Button("Cancel") { store.cancel(job.id) }
+            }
+            if case .running = job.status {
+                Button("Cancel") { store.cancel(job.id) }
+            }
+            if case .failed = job.status {
+                Button("Retry") { store.retry(job.id) }
+            }
+            if job.status == .cancelled {
+                Button("Retry") { store.retry(job.id) }
+            }
+            Button("Remove", role: .destructive) { store.remove(job.id) }
+        }
+    }
+
+    private func openRecord(jobID: UUID, record: String) {
+        library.focus(recordPath: record)
+        navigation.go(to: .library)
+        store.remove(jobID)
     }
 }
 
 struct JobRow: View {
     let job: Job
+    let openRecord: (String) -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -216,19 +164,18 @@ struct JobRow: View {
                 }
 
                 HStack(spacing: 8) {
-                    badge(job.configuration.format == "srt" ? "SRT" : "Markdown")
-                    if !job.configuration.speakers.isEmpty {
-                        badge(job.configuration.speakers.joined(separator: ", "))
+                    if let count = job.configuration.speakerCount {
+                        badge(count == 1 ? "1 speaker" : "\(count) speakers")
                     }
-                    if job.configuration.timed && job.configuration.format == "md" {
-                        badge("Timed")
-                    }
-                    if case .done(let output) = job.status {
-                        Text(output)
+                    if case .done(let record) = job.status {
+                        if let record {
+                            Button("Open") { openRecord(record) }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        }
+                        Text("Saved to Library")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
                     }
                 }
             }

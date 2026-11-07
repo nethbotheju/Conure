@@ -6,7 +6,7 @@ import Combine
 enum JobStatus: Equatable {
     case queued
     case running(stage: String, percent: Double)
-    case done(output: String)
+    case done(record: String?)
     case failed(String)
     case cancelled
 
@@ -21,19 +21,10 @@ enum JobStatus: Equatable {
     }
 }
 
-enum CollisionPolicy: String {
-    case replace
-    case unique
-}
-
 struct JobConfiguration {
     var model: String?
     var language: String?
-    var speakers: [String]
-    var format: String
-    var timed: Bool
-    var outputDirectory: URL?
-    var collision: CollisionPolicy?
+    var speakerCount: Int?
 
     var resolvedModelID: String {
         if let model, !model.isEmpty { return model }
@@ -41,17 +32,11 @@ struct JobConfiguration {
     }
 
     var requiredModelIDs: [String] {
-        speakers.isEmpty ? ["silero"] : ["sortformer"]
+        speakerCount == nil ? ["silero"] : ["sortformer"]
     }
 
     var modelIDsInPlay: [String] {
         [resolvedModelID] + requiredModelIDs
-    }
-
-    func desiredOutputPath(for input: URL) -> String {
-        let directory = outputDirectory ?? input.deletingLastPathComponent()
-        let base = input.deletingPathExtension().lastPathComponent
-        return directory.appendingPathComponent("\(base).\(format)").path
     }
 }
 
@@ -111,34 +96,21 @@ final class QueueStore: ObservableObject {
         startNextIfNeeded()
     }
 
-    func outputConflicts(inputs: [URL], configuration: JobConfiguration) -> [String] {
-        let queued = jobs.filter {
-            if case .queued = $0.status { return true }
-            if case .running = $0.status { return true }
-            return false
-        }
-        let claimed = Set(queued.map { $0.configuration.desiredOutputPath(for: $0.input) })
-        var counts: [String: Int] = [:]
-        for input in inputs {
-            let path = configuration.desiredOutputPath(for: input)
-            counts[path, default: 0] += 1
-        }
-        return counts.keys
-            .filter { path in
-                counts[path]! > 1
-                    || claimed.contains(path)
-                    || FileManager.default.fileExists(atPath: path)
-            }
-            .map { ($0 as NSString).lastPathComponent }
-            .sorted()
-    }
-
     func remove(_ jobID: UUID) {
         if jobID == currentJobID {
             cancelling = true
             cancelCurrent()
         }
         jobs.removeAll { $0.id == jobID }
+        syncModelUsage()
+        startNextIfNeeded()
+    }
+
+    func clearCompleted() {
+        jobs.removeAll { job in
+            if case .done = job.status { return true }
+            return false
+        }
         syncModelUsage()
         startNextIfNeeded()
     }
@@ -198,11 +170,7 @@ final class QueueStore: ObservableObject {
             input: job.input,
             model: job.configuration.model,
             language: job.configuration.language,
-            speakers: job.configuration.speakers.isEmpty ? nil : job.configuration.speakers,
-            format: job.configuration.format,
-            timed: job.configuration.timed,
-            output: job.configuration.outputDirectory,
-            collision: job.configuration.collision
+            speakerCount: job.configuration.speakerCount
         )
         CLI.shared.configure(process)
 

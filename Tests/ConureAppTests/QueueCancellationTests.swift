@@ -16,12 +16,12 @@ final class QueueCancellationTests: XCTestCase {
           echo '{"type":"progress","stage":"asr","percent":10}'
           while :; do sleep 0.05; done
         fi
-        echo '{"type":"done","outputPath":"/tmp/next.md"}'
+        echo '{"type":"done","recordPath":"/tmp/next.md"}'
         """.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
 
         let store = QueueStore(executableURL: script)
-        let configuration = JobConfiguration(model: nil, language: nil, speakers: [], format: "md", timed: false, outputDirectory: nil)
+        let configuration = JobConfiguration(model: nil, language: nil, speakerCount: nil)
         store.add(inputs: ["slow", "skip", "remove", "next"].map { directory.appendingPathComponent($0) }, configuration: configuration)
         let ids = store.jobs.map(\.id)
         let started = await awaitStatus(store, ids[0]) { if case .running = $0 { true } else { false } }
@@ -35,7 +35,7 @@ final class QueueCancellationTests: XCTestCase {
 
         store.cancel(ids[0])
         XCTAssertEqual(store.jobs.first { $0.id == ids[0] }?.status, .cancelled)
-        let finished = await awaitStatus(store, ids[3]) { $0 == .done(output: "/tmp/next.md") }
+        let finished = await awaitStatus(store, ids[3]) { $0 == .done(record: "/tmp/next.md") }
         XCTAssertTrue(finished, "\(store.jobs.map { ($0.input.lastPathComponent, $0.status) })")
         XCTAssertEqual(store.jobs.first { $0.id == ids[0] }?.status, .cancelled)
         XCTAssertEqual(store.jobs.first { $0.id == ids[1] }?.status, .cancelled)

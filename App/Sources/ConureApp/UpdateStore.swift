@@ -10,15 +10,27 @@ final class UpdateStore: NSObject, ObservableObject, SPUUserDriver, SPUUpdaterDe
         case unsupported(String)
     }
 
+    enum ManualState: Equatable {
+        case idle
+        case checking
+        case update(ManualRelease)
+        case current(ManualRelease)
+        case unknown(ManualRelease)
+        case failed(String)
+    }
+
     @Published private(set) var state: State
     @Published private(set) var offer: UpdateOffer?
     @Published private(set) var receivedBytes: UInt64 = 0
     @Published private(set) var expectedBytes: UInt64 = 0
     @Published private(set) var extractionProgress = 0.0
     @Published private(set) var installBlockedMessage: String?
+    @Published private(set) var manualState: ManualState = .idle
     let configuration: UpdateConfiguration
     private let canQuitForInstall: () -> Bool
     private let makeUpdater: (UpdateStore) -> SPUUpdater
+    private let manualCheck: @Sendable (String?) async throws -> ManualCheckResult
+    private var manualTask: Task<Void, Never>?
     private var updater: SPUUpdater?
     private var updateReply: ((SPUUserUpdateChoice) -> Void)?
     private var installReply: ((SPUUserUpdateChoice) -> Void)?
@@ -31,10 +43,14 @@ final class UpdateStore: NSObject, ObservableObject, SPUUserDriver, SPUUpdaterDe
          makeUpdater: @escaping (UpdateStore) -> SPUUpdater = {
              SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: $0, delegate: $0)
          },
-         canQuitForInstall: @escaping () -> Bool = { true }) {
+         canQuitForInstall: @escaping () -> Bool = { true },
+         manualCheck: @escaping @Sendable (String?) async throws -> ManualCheckResult = { installed in
+             try await ManualUpdateChecker.latest(installedVersion: installed)
+         }) {
         self.configuration = configuration
         self.makeUpdater = makeUpdater
         self.canQuitForInstall = canQuitForInstall
+        self.manualCheck = manualCheck
         state = configuration.disabledReason.map(State.unsupported) ?? .idle
         super.init()
     }
@@ -48,7 +64,18 @@ final class UpdateStore: NSObject, ObservableObject, SPUUserDriver, SPUUpdaterDe
         }
     }
 
+    var canRequestCheck: Bool {
+        guard configuration.disabledReason == nil else {
+            return manualState != .checking
+        }
+        return canCheck
+    }
+
     func check() {
+        guard configuration.disabledReason == nil else {
+            checkManually()
+            return
+        }
         guard canCheck else { return }
         do {
             if updater == nil {
@@ -62,6 +89,30 @@ final class UpdateStore: NSObject, ObservableObject, SPUUserDriver, SPUUpdaterDe
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func checkManually() {
+        guard manualTask == nil, manualState != .checking else { return }
+        manualState = .checking
+        let installed = configuration.version
+        manualTask = Task { [weak self, manualCheck] in
+            do {
+                let result = try await manualCheck(installed)
+                self?.applyManualResult(result)
+            } catch {
+                self?.manualState = .failed(error.localizedDescription)
+                self?.manualTask = nil
+            }
+        }
+    }
+
+    private func applyManualResult(_ result: ManualCheckResult) {
+        switch result {
+        case .update(let release): manualState = .update(release)
+        case .current(let release): manualState = .current(release)
+        case .unknown(let release): manualState = .unknown(release)
+        }
+        manualTask = nil
     }
 
     func download() {

@@ -1,19 +1,33 @@
 import Foundation
 
+public struct TranscribeResult: Sendable {
+    public let transcript: Transcript
+    public let record: TranscriptRecord
+    public let outputURL: URL?
+    public let recordURL: URL?
+
+    public init(transcript: Transcript, record: TranscriptRecord, outputURL: URL?, recordURL: URL?) {
+        self.transcript = transcript
+        self.record = record
+        self.outputURL = outputURL
+        self.recordURL = recordURL
+    }
+}
+
 public enum TranscribePipeline {
 
     public static func transcribeFile(
         _ url: URL,
         options: TranscribeOptions,
         progress: ProgressSink? = nil
-    ) async throws -> (transcript: Transcript, outputURL: URL) {
+    ) async throws -> TranscribeResult {
         try Task.checkCancellation()
         let desiredOutputURL = TranscriptWriter.outputURL(
             for: url,
             format: options.format,
             overrideDirectory: options.outputDirectory
         )
-        let plannedOutputURL = try options.resolvedOutputURL
+        let plannedOutputURL = options.skipExport ? nil : try options.resolvedOutputURL
             ?? OutputPlanner.resolve(desired: desiredOutputURL, policy: options.collisionPolicy)
         progress?(.progress(.decode, 0, url.lastPathComponent))
         let timing = ProcessInfo.processInfo.environment["CONURE_TIMING"] == "1"
@@ -37,7 +51,7 @@ public enum TranscribePipeline {
         try Task.checkCancellation()
         if timing { FileHandle.standardError.write(Data("[timing] asr-load \(CFAbsoluteTimeGetCurrent() - tLoad)s\n".utf8)) }
 
-        let diarize = options.speakerNames != nil && !(options.speakerNames ?? []).isEmpty
+        let diarize = options.wantsSpeakerLabels
 
         let rawSegments: [RawSegment]
         if diarize {
@@ -84,27 +98,77 @@ public enum TranscribePipeline {
         }
         if timing { FileHandle.standardError.write(Data("[timing] asr \(CFAbsoluteTimeGetCurrent() - tAsr)s for \(chunks.count) chunks (\(duration)s audio)\n".utf8)) }
 
-        let speakerNames: [String]?
-        if diarize {
-            let provided = options.speakerNames ?? []
-            speakerNames = provided.isEmpty ? nil : provided
-        } else {
-            speakerNames = nil
+        let providedNames = (options.speakerNames ?? []).filter { !$0.isEmpty }
+        let requestedCount = diarize ? (options.speakerCount ?? (providedNames.isEmpty ? nil : providedNames.count)) : nil
+        let attribution = SpeakerAttribution.attribute(
+            lines: lines,
+            requestedCount: requestedCount,
+            legacyNames: providedNames.isEmpty ? nil : providedNames
+        )
+        for note in attribution.notes {
+            progress?(.progress(.diarize, 100, note))
         }
 
         let transcript = Transcript(
             sourceURL: url,
             audioDuration: duration,
             modelId: transcriber.modelId,
-            speakerNames: speakerNames,
+            speakerNames: madeSpeakerNames(attribution.speakers),
             lines: lines
+        )
+
+        let record = TranscriptRecord(
+            title: url.lastPathComponent,
+            sourcePath: url.path,
+            duration: duration,
+            model: transcriber.modelId,
+            requestedSpeakerCount: requestedCount,
+            speakers: attribution.speakers,
+            lines: attribution.lines
         )
 
         try Task.checkCancellation()
         progress?(.progress(.write, 0))
-        let content = try TranscriptWriter.write(transcript, format: options.format, timed: options.timed)
-        var outputURL = plannedOutputURL
-        switch options.collisionPolicy {
+        let recordURL = try saveRecord(record, options: options)
+        let outputURL = plannedOutputURL.map { planned in
+            let content = RecordRenderer.render(record, format: options.format, timed: options.timed)
+            return (planned, content)
+        }
+        if let (planned, content) = outputURL {
+            try write(content, to: planned, desired: desiredOutputURL, policy: options.collisionPolicy)
+        }
+        progress?(.progress(.write, 100))
+
+        return TranscribeResult(transcript: transcript, record: record, outputURL: outputURL?.0, recordURL: recordURL)
+    }
+
+    private static func madeSpeakerNames(_ speakers: [RecordSpeaker]) -> [String]? {
+        guard !speakers.isEmpty else { return nil }
+        let names = speakers.sorted { $0.id < $1.id }.map { $0.name ?? "" }
+        return names.contains(where: { !$0.isEmpty }) ? names : nil
+    }
+
+    private static func saveRecord(_ record: TranscriptRecord, options: TranscribeOptions) throws -> URL? {
+        var saved: URL?
+        if let path = options.recordPath {
+            try RecordIO.save(record, to: path)
+            saved = path
+        }
+        if options.saveToLibrary {
+            let directory = options.libraryDirectory ?? RecordLibrary.directoryURL()
+            saved = try RecordLibrary.save(record, in: directory)
+        }
+        return saved
+    }
+
+    private static func write(
+        _ content: String,
+        to planned: URL,
+        desired: URL,
+        policy: OutputCollisionPolicy
+    ) throws {
+        var outputURL = planned
+        switch policy {
         case .replace:
             break
         case .fail:
@@ -113,7 +177,7 @@ public enum TranscribePipeline {
             }
         case .unique:
             if FileManager.default.fileExists(atPath: outputURL.path) {
-                outputURL = try OutputPlanner.resolve(desired: desiredOutputURL, policy: .unique)
+                outputURL = try OutputPlanner.resolve(desired: desired, policy: .unique)
             }
         }
         try FileManager.default.createDirectory(
@@ -131,9 +195,6 @@ public enum TranscribePipeline {
             }
         }
         guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        progress?(.progress(.write, 100))
-
-        return (transcript, outputURL)
     }
 }
 

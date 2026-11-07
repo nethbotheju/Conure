@@ -33,10 +33,12 @@ struct JobCompletion {
         if exitStatus.code == 0, exitStatus.reason == .exit {
             switch terminalEvent?.type {
             case .done:
-                if let output = terminalEvent?.outputPath, !output.isEmpty {
-                    return .done(output: output)
+                let record = terminalEvent?.recordPath
+                let output = terminalEvent?.outputPath ?? ""
+                if (record ?? "").isEmpty && output.isEmpty {
+                    return .failed("Invalid done event: missing record and output paths")
                 }
-                return .failed("Invalid done event: missing output path")
+                return .done(record: record)
             case .error:
                 return .failed(terminalEvent?.detail ?? "Unknown error")
             default:

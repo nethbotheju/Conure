@@ -38,12 +38,12 @@ final class FakeModelExecutor: ModelOperationExecuting, @unchecked Sendable {
 
     func emitProgress(_ percent: Double, for id: String) {
         let sink = lock.withLock { eventSinks[id] }
-        sink?(CLIEvent(type: .progress, stage: nil, percent: percent, detail: nil, outputPath: nil))
+        sink?(CLIEvent(type: .progress, stage: nil, percent: percent, detail: nil, outputPath: nil, recordPath: nil))
     }
 
     func emitError(_ detail: String, for id: String) {
         let sink = lock.withLock { eventSinks[id] }
-        sink?(CLIEvent(type: .error, stage: nil, percent: nil, detail: detail, outputPath: nil))
+        sink?(CLIEvent(type: .error, stage: nil, percent: nil, detail: detail, outputPath: nil, recordPath: nil))
     }
 
     func finish(_ id: String) {

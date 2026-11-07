@@ -45,32 +45,54 @@ public struct TranscribeOptions: Sendable {
     public var modelId: String?
     public var language: String?
     public var speakerNames: [String]?
+    public var diarize: Bool
+    public var speakerCount: Int?
     public var format: OutputFormat
     public var timed: Bool
     public var outputDirectory: URL?
     public var maxChunkDuration: Double
     public var collisionPolicy: OutputCollisionPolicy
     public var resolvedOutputURL: URL?
+    public var recordPath: URL?
+    public var saveToLibrary: Bool
+    public var skipExport: Bool
+    public var libraryDirectory: URL?
 
     public init(
         modelId: String? = nil,
         language: String? = "en",
         speakerNames: [String]? = nil,
+        diarize: Bool = false,
+        speakerCount: Int? = nil,
         format: OutputFormat = .markdown,
         timed: Bool = false,
         outputDirectory: URL? = nil,
         maxChunkDuration: Double = 25.0,
         collisionPolicy: OutputCollisionPolicy = .fail,
-        resolvedOutputURL: URL? = nil
+        resolvedOutputURL: URL? = nil,
+        recordPath: URL? = nil,
+        saveToLibrary: Bool = false,
+        skipExport: Bool = false,
+        libraryDirectory: URL? = nil
     ) {
         self.modelId = modelId
         self.language = language
         self.speakerNames = speakerNames
+        self.diarize = diarize
+        self.speakerCount = speakerCount
         self.format = format
         self.timed = timed
         self.outputDirectory = outputDirectory
         self.maxChunkDuration = maxChunkDuration
         self.collisionPolicy = collisionPolicy
         self.resolvedOutputURL = resolvedOutputURL
+        self.recordPath = recordPath
+        self.saveToLibrary = saveToLibrary
+        self.skipExport = skipExport
+        self.libraryDirectory = libraryDirectory
+    }
+
+    public var wantsSpeakerLabels: Bool {
+        diarize || speakerCount != nil || !(speakerNames ?? []).isEmpty
     }
 }

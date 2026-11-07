@@ -83,12 +83,22 @@ struct DiagnosticsView: View {
                 Link("Conure license", destination: URL(string: "https://github.com/nethbotheju/Conure/blob/main/LICENSE")!)
                 Link("FluidAudio — Apache-2.0", destination: URL(string: "https://github.com/FluidInference/FluidAudio/blob/v0.17.4/LICENSE")!)
                 Link("speech-swift — Apache-2.0", destination: URL(string: "https://github.com/soniqo/speech-swift/blob/main/LICENSE")!)
-                Text("Model licenses are linked from Settings → Models; additional credits are in Settings → Credits.")
+                Text("Model licenses are linked from Settings → Models.")
                     .font(.caption)
+            }
+            Section("Credits") {
+                Text("Sparkle — MIT and third-party notices")
+                Text("FluidAudio — Apache-2.0")
+                Text("speech-swift — Apache-2.0 (vendored fork)")
+                Text("Parakeet models © NVIDIA. See each model’s Hugging Face page for its license and attribution; Unified EN is CC-BY-4.0.")
+                Text("Sortformer © NVIDIA. Silero VAD — MIT.")
+                Link("Sparkle license", destination: URL(string: "https://github.com/sparkle-project/Sparkle/blob/2.10.0/LICENSE")!)
             }
         }
         .textSelection(.enabled)
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .task { await reload() }
     }
 

@@ -11,7 +11,7 @@ Pure SwiftPM project — there is no Xcode project or workspace. Do not create o
 ```
 Sources/ConureCore/     engine library: Audio, Transcriber, Diarizer, Segmenter, Writers, ModelStore, Pipeline, Events, Transcript
 Sources/conure/         CLI executable (ArgumentParser); ConureVersion.swift holds the version constant
-App/Sources/ConureApp/  SwiftUI app: QueueStore (job runner), CLI (subprocess + line buffering), SetupStore, JobsView, AddJobSheet, SettingsView
+App/Sources/ConureApp/  SwiftUI app (one window, sidebar-driven): RootView + AppNavigation (Upload/Queue/Library/Settings), UploadView, JobsView, LibraryStore/LibraryCatalog/LibraryView/TranscriptView, SettingsView, QueueStore (job runner), CLI (subprocess + line buffering), SetupStore
 App/Resources/          icon-master.png / icon-dev-master.png (sources), AppIcon.icns / AppIcon-Dev.icns and icon*.png (generated — never edit by hand)
 vendor/speech-swift/    PATCHED local fork of soniqo/speech-swift — see rules below
 scripts/                make-app.sh, make-dmg.sh, make-icon.swift

@@ -8,8 +8,11 @@ struct ConureApp: App {
     @StateObject private var setup: SetupStore
     @StateObject private var updates: UpdateStore
     @StateObject private var inbox: ExternalOpenInbox
+    @StateObject private var library: LibraryStore
+    @StateObject private var navigation: AppNavigation
+    @StateObject private var draft: UploadDraft
+    @StateObject private var inventory: ModelInventory
     @NSApplicationDelegateAdaptor(ConureApplicationDelegate.self) private var appDelegate
-    @Environment(\.openWindow) private var openWindow
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
@@ -34,55 +37,59 @@ struct ConureApp: App {
         _updates = StateObject(wrappedValue: updates)
         let inbox = ExternalOpenInbox()
         _inbox = StateObject(wrappedValue: inbox)
+        _library = StateObject(wrappedValue: LibraryStore())
+        _navigation = StateObject(wrappedValue: AppNavigation())
+        _draft = StateObject(wrappedValue: UploadDraft())
+        _inventory = StateObject(wrappedValue: ModelInventory())
         appDelegate.updates = updates
         appDelegate.openInbox = inbox
     }
 
     var body: some Scene {
-        Window(CLI.shared.isDevApp ? "Conure Dev" : "Conure", id: "queue") {
-            JobsView()
+        Window(CLI.shared.isDevApp ? "Conure Dev" : "Conure", id: "main") {
+            RootView()
                 .environmentObject(store)
                 .environmentObject(setup)
                 .environmentObject(inbox)
+                .environmentObject(library)
+                .environmentObject(updates)
+                .environmentObject(modelCoordinator)
+                .environmentObject(navigation)
+                .environmentObject(draft)
+                .environmentObject(inventory)
                 .disabled(updates.isInstalling)
-                .frame(minWidth: 560, minHeight: 380)
-                .onAppear {
-                    NSApp.activate(ignoringOtherApps: true)
-                    setup.ensureRequiredModelsIfNeeded()
-                }
         }
+        .defaultSize(width: 860, height: 560)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button(CLI.shared.isDevApp ? "About Conure Dev" : "About Conure") {
-                    openWindow(id: "about")
+                    navigation.openSettings(.about)
                 }
                 Button("Check for Updates…") {
-                    openWindow(id: "updates")
+                    navigation.openSettings(.updates)
                     updates.check()
                 }
             }
-        }
-
-        Window(CLI.shared.isDevApp ? "About Conure Dev" : "About Conure", id: "about") {
-            DiagnosticsView()
-                .frame(minWidth: 480, minHeight: 440)
-        }
-        .defaultSize(width: 540, height: 640)
-
-        Window("Software Updates", id: "updates") {
-            UpdatesView()
-                .environmentObject(updates)
-                .frame(minWidth: 440, maxWidth: .infinity, minHeight: 280, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .defaultSize(width: 520, height: 520)
-
-        Settings {
-            SettingsView()
-                .environmentObject(store)
-                .environmentObject(modelCoordinator)
-                .disabled(updates.isInstalling)
-                .frame(width: 480, height: 440)
+            CommandGroup(after: .newItem) {
+                Button("Upload…") {
+                    navigation.go(to: .upload)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                Divider()
+                Button("Queue") {
+                    navigation.go(to: .queue)
+                }
+                .keyboardShortcut("1", modifiers: .command)
+                Button("Library") {
+                    navigation.go(to: .library)
+                }
+                .keyboardShortcut("2", modifiers: .command)
+                Button("Settings…") {
+                    navigation.openSettings(navigation.settingsTab)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }
